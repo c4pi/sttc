@@ -1,3 +1,3 @@
-"""sttc — Python 3.12 project template."""
+"""sttc package."""
 
 __version__ = "0.1.0"

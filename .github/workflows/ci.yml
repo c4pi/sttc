@@ -24,6 +24,11 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v4
 
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2 xclip
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
@@ -32,6 +37,10 @@ jobs:
 
       - name: Type check
         run: uv run mypy src
+      - name: Test (Ubuntu headless)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a uv run pytest -q
 
-      - name: Test
+      - name: Test (macOS and Windows)
+        if: matrix.os != 'ubuntu-latest'
         run: uv run pytest -q
