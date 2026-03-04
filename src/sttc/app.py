@@ -2,6 +2,7 @@
 
 import logging
 import queue
+import subprocess
 import sys
 import threading
 
@@ -14,17 +15,36 @@ from sttc.transcriber import TranscriberFn, build_transcriber
 
 logger = logging.getLogger(__name__)
 
-try:
+if sys.platform == "win32":  # pragma: no cover - platform dependent
     import winsound
-except ImportError:  # pragma: no cover - non-Windows
-    winsound = None  # type: ignore[assignment]
+
+
+def _run_notification_command(command: list[str]) -> bool:
+    try:
+        result = subprocess.run(  # noqa: S603 - command list is hardcoded in _notify_copied
+            command,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:  # pragma: no cover - platform dependent
+        return False
+    return result.returncode == 0
 
 
 def _notify_copied() -> None:
-    if winsound:
+    if sys.platform == "win32":  # pragma: no cover - platform dependent
         winsound.MessageBeep()
-    else:  # pragma: no cover - platform dependent
-        print("\a", end="", flush=True)
+        return
+    if sys.platform == "darwin" and _run_notification_command(["osascript", "-e", "beep"]):
+        return
+    for command in (
+        ["paplay", "/usr/share/sounds/freedesktop/stereo/complete.oga"],
+        ["canberra-gtk-play", "--id", "complete"],
+    ):
+        if _run_notification_command(command):
+            return
+    print("\a", end="", flush=True)
 
 
 def _print_banner(settings: Settings) -> None:
