@@ -32,6 +32,10 @@ jobs:
 
       - name: Type check
         run: uv run mypy src
+      - name: Test (Ubuntu headless)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a uv run pytest -q
 
-      - name: Test
+      - name: Test (macOS and Windows)
+        if: matrix.os != 'ubuntu-latest'
         run: uv run pytest -q
