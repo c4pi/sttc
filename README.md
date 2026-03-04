@@ -1,16 +1,11 @@
 # sttc
-## speech to text clipboard
 
-Speech-to-text with hotkey. Hold `Ctrl+Shift` to record, release to transcribe to clipboard.
+Hotkey-driven speech-to-text clipboard tool.
 
-**Install:** `uv sync` then `uv run audio-prompter`
-
-**Config:** Create `.env` with `GEMINI_API_KEY=your_key` (or use `TRANSCRIPTION_BACKEND=whisper` for local)
-
-## Requirements
-
-- Python 3.12+
-- [UV](https://docs.astral.sh/uv/) (recommended)
+1. Press your hotkey (default: `Ctrl+Shift`) to start recording.
+2. Press the same hotkey again to finish transcription.
+3. Transcript is copied to clipboard.
+4. Use your quit hotkey (default: `Ctrl+Alt+Q`) to exit the app.
 
 ## Quick start
 
@@ -18,58 +13,38 @@ Speech-to-text with hotkey. Hold `Ctrl+Shift` to record, release to transcribe t
 uv sync
 cp .env.example .env
 uv run sttc --help
+uv run sttc run
+```
+
+## Linux prerequisites (Ubuntu)
+
+`uv sync` installs Python packages only. Audio/clipboard system libraries must be installed via `apt`.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libportaudio2 xclip
+```
+
+Wayland users can install `wl-clipboard` (`wl-copy`) instead of `xclip`:
+
+```bash
+sudo apt-get install -y libportaudio2 wl-clipboard
+```
+
+## Runtime configuration
+
+`sttc` loads settings from `.env` using `src/sttc/settings.py`.
+
+- Set `STT_MODEL` for cloud transcription via LiteLLM.
+- Leave `STT_MODEL` empty for local `faster-whisper`.
+- Set `RECORDING_MODE=toggle` (default) or `RECORDING_MODE=hold`.
+- Set `RECORDING_HOTKEY` (for example `ctrl+shift`, `ctrl+alt+r`, `f8`).
+- Set `QUIT_HOTKEY` for exiting the app (for example `ctrl+alt+q`, `ctrl+shift+escape`).
+
+## Development checks
+
+```bash
 uv run pytest
+uv run ruff check .
+uv run mypy src
 ```
-
-## Project structure
-
-```
-sttc/
-├── .env.example
-├── .gitignore
-├── .pre-commit-config.yaml
-├── .secrets.baseline
-├── .github/
-│   └── workflows/
-│       └── ci.yml
-├── README.md
-├── LICENSE               # when license=MIT
-├── main.py
-├── pyproject.toml
-├── src/
-│   └── sttc/
-│       ├── __init__.py
-│       ├── cli.py
-│       └── settings.py
-└── tests/
-    ├── __init__.py
-    └── test_sttc.py
-```
-
-## Development commands
-
-| Command                             | Description                          |
-| ----------------------------------- | ------------------------------------ |
-| `uv sync --all-extras --dev`        | Install runtime and dev dependencies |
-| `uv run ruff check .`               | Lint                                 |
-| `uv run mypy src`                   | Type-check                           |
-| `uv run pytest -q`                  | Run tests                            |
-| `uv run pre-commit run --all-files` | Run all pre-commit hooks             |
-
-## Settings
-
-The default configuration lives in `src/sttc/settings.py` and is loaded from `.env`.
-
-1. Copy `.env.example` to `.env`.
-2. Adjust values for your environment.
-
-## CI
-
-A starter GitHub Actions workflow is included at `.github/workflows/ci.yml`.
-It runs lint, type-checking, and tests on Linux, macOS, and Windows on push/PR.
-
-## License
-
-
-MIT (see `LICENSE`).
-
