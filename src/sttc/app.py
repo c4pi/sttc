@@ -113,6 +113,8 @@ def transcription_loop(
                     copy_to_clipboard(full_text)
                     _notify_copied()
                     logger.info("Transcript copied to clipboard")
+                except RuntimeError as exc:
+                    logger.warning("Transcript available above, but clipboard copy is unavailable: %s", exc)
                 except Exception:
                     logger.exception("Failed to copy to clipboard")
             else:
