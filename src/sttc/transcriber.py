@@ -5,6 +5,8 @@ import io
 import logging
 from typing import Any
 
+from faster_whisper import WhisperModel
+from litellm import transcription
 import numpy as np
 import soundfile as sf
 
@@ -69,11 +71,6 @@ def _extract_transcription_text(response: Any) -> str:
 
 
 def _build_cloud_transcriber(model_name: str) -> TranscriberFn:
-    try:
-        from litellm import transcription
-    except Exception as exc:
-        raise RuntimeError("litellm is required for cloud transcription") from exc
-
     logger.info("Cloud transcription configured with model: %s", model_name)
 
     def transcribe(audio: np.ndarray, samplerate: int) -> str:
@@ -88,11 +85,6 @@ def _build_cloud_transcriber(model_name: str) -> TranscriberFn:
 
 
 def _build_local_transcriber(model_name: str, target_sr: int) -> TranscriberFn:
-    try:
-        from faster_whisper import WhisperModel
-    except Exception as exc:
-        raise RuntimeError("faster-whisper is required for local transcription") from exc
-
     logger.info("Loading faster-whisper model: %s", model_name)
     whisper_model = WhisperModel(model_name, device="cpu", compute_type="int8")
     logger.info("faster-whisper ready")
