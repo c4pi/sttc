@@ -16,6 +16,21 @@ uv run sttc --help
 uv run sttc run
 ```
 
+## Linux prerequisites (Ubuntu)
+
+`uv sync` installs Python packages only. Audio/clipboard system libraries must be installed via `apt`.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libportaudio2 xclip
+```
+
+Wayland users can install `wl-clipboard` (`wl-copy`) instead of `xclip`:
+
+```bash
+sudo apt-get install -y libportaudio2 wl-clipboard
+```
+
 ## Runtime configuration
 
 `sttc` loads settings from `.env` using `src/sttc/settings.py`.

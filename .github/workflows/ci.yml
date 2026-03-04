@@ -24,6 +24,11 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v4
 
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2 xclip
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
