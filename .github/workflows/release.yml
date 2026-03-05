@@ -60,7 +60,6 @@ jobs:
           uv run pyinstaller --clean \
             --windowed \
             --name STTC \
-            --icon scripts/appimage/sttc.png \
             --add-data ".env.example:." \
             src/sttc/__main__.py
 
