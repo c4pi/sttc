@@ -2,6 +2,7 @@
 
 import logging
 import sys
+import traceback
 from typing import TypedDict, cast
 
 import rich_click as click
@@ -11,6 +12,8 @@ from tqdm import tqdm
 
 from sttc import __version__
 from sttc.app import run as run_app
+from sttc.autostart import disable_autostart, enable_autostart, is_autostart_enabled
+from sttc.first_run import run_first_launch_setup
 from sttc.settings import Settings, get_settings
 
 
@@ -42,6 +45,16 @@ def _configure_logging(*, verbose: bool) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
+def _is_bundled_runtime() -> bool:
+    return getattr(sys, "_MEIPASS", None) is not None
+
+
+def _prepare_bundled_default_command() -> None:
+    # Double-clicking bundled sttc.exe provides no args; default to interactive run mode.
+    if _is_bundled_runtime() and len(sys.argv) == 1:
+        sys.argv.append("run")
+
+
 click_config.HEADER_TEXT = "[bold cyan]sttc[/] - [dim]sttc - speech to text clipboard[/]"
 click_config.OPTIONS_PANEL_TITLE = "Options"
 click_config.COMMANDS_PANEL_TITLE = "Commands"
@@ -65,7 +78,9 @@ def cli_group(ctx: click.Context, verbose: bool) -> None:
 @click.pass_context
 def cmd_run(ctx: click.Context) -> None:
     context = cast("CliContext", ctx.obj)
-    run_app(context["settings"])
+    settings = context["settings"]
+    run_first_launch_setup(settings)
+    run_app(settings)
 
 
 @cli_group.command("version", help="Print the application version.")
@@ -84,6 +99,7 @@ def cmd_settings(ctx: click.Context) -> None:
     click.echo(f"stt_model={settings.stt_model}")
     click.echo(f"stt_chunk_seconds={settings.stt_chunk_seconds}")
     click.echo(f"stt_whisper_model={settings.stt_whisper_model}")
+    click.echo(f"stt_model_cache_dir={settings.stt_model_cache_dir}")
     click.echo(f"sample_rate_target={settings.sample_rate_target}")
     click.echo(f"channels={settings.channels}")
     click.echo(f"recording_mode={settings.recording_mode}")
@@ -91,8 +107,38 @@ def cmd_settings(ctx: click.Context) -> None:
     click.echo(f"quit_hotkey={settings.quit_hotkey}")
 
 
+@cli_group.group("autostart", help="Manage startup-on-login behavior.")
+def autostart_group() -> None:
+    return
+
+
+@autostart_group.command("enable", help="Enable startup on login.")
+def cmd_autostart_enable() -> None:
+    enable_autostart()
+    click.echo("Auto-start enabled")
+
+
+@autostart_group.command("disable", help="Disable startup on login.")
+def cmd_autostart_disable() -> None:
+    disable_autostart()
+    click.echo("Auto-start disabled")
+
+
+@autostart_group.command("status", help="Show startup-on-login status.")
+def cmd_autostart_status() -> None:
+    status = "enabled" if is_autostart_enabled() else "disabled"
+    click.echo(f"Auto-start is {status}")
+
+
 def main() -> None:
-    cli_group(obj={})
+    _prepare_bundled_default_command()
+    try:
+        cli_group(obj={})
+    except Exception:
+        if _is_bundled_runtime():
+            traceback.print_exc()
+            input("STTC crashed. Press Enter to exit...")
+        raise
 
 
 if __name__ == "__main__":

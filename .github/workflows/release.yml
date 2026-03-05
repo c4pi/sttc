@@ -1,0 +1,155 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Build executable
+        run: uv run pyinstaller --clean sttc.spec
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binary
+          path: dist/sttc.exe
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install portaudio
+        run: brew install portaudio
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Build CLI executable
+        run: uv run pyinstaller --clean sttc.spec
+
+      - name: Build macOS app bundle
+        run: |
+          uv run pyinstaller --clean \
+            --windowed \
+            --name STTC \
+            --icon scripts/appimage/sttc.png \
+            --add-data ".env.example:." \
+            src/sttc/__main__.py
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-binary
+          path: dist/sttc
+
+      - name: Upload app bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          path: dist/STTC.app
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2 xclip wget fuse libfuse2
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Build executable
+        run: uv run pyinstaller --clean sttc.spec
+
+      - name: Build AppImage
+        run: |
+          chmod +x scripts/appimage/AppRun
+          mkdir -p AppDir/usr/bin
+          cp dist/sttc AppDir/usr/bin/sttc
+          cp scripts/appimage/AppRun AppDir/AppRun
+          cp scripts/appimage/sttc.desktop AppDir/sttc.desktop
+          cp scripts/appimage/sttc.png AppDir/sttc.png
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+          ./appimagetool AppDir sttc-linux-x64.AppImage
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: dist/sttc
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: sttc-linux-x64.AppImage
+
+  create-release:
+    runs-on: ubuntu-latest
+    needs:
+      - build-windows
+      - build-macos
+      - build-linux
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Prepare release files
+        run: |
+          cp release-artifacts/windows-binary/sttc.exe sttc-windows-x64.exe
+          cp release-artifacts/linux-appimage/sttc-linux-x64.AppImage sttc-linux-x64.AppImage
+          cp release-artifacts/linux-binary/sttc sttc-linux-x64
+          cp -r release-artifacts/macos-app/STTC.app STTC.app
+          zip -r sttc-macos-x64.app.zip STTC.app
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            sttc-windows-x64.exe
+            sttc-macos-x64.app.zip
+            sttc-linux-x64.AppImage
+            sttc-linux-x64
