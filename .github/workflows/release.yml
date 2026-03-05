@@ -69,11 +69,25 @@ jobs:
           name: macos-binary
           path: dist/sttc
 
+      - name: Locate macOS app bundle
+        id: macos_app
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find dist -maxdepth 2 -type d -name '*.app' | head -n 1 || true)"
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app bundle found under dist"
+            find dist -maxdepth 4 -print || true
+            exit 1
+          fi
+          echo "Using app bundle: $APP_PATH"
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+
       - name: Upload app bundle artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-app
-          path: dist/STTC.app
+          path: ${{ steps.macos_app.outputs.app_path }}
 
   build-linux:
     runs-on: ubuntu-latest
@@ -143,13 +157,13 @@ jobs:
           cp release-artifacts/linux-appimage/sttc-linux-x64.AppImage sttc-linux-x64.AppImage
           cp release-artifacts/linux-binary/sttc sttc-linux-x64
 
-          if [ -d release-artifacts/macos-app/STTC.app ]; then
-            MAC_APP_PATH=release-artifacts/macos-app/STTC.app
-          elif [ -d release-artifacts/macos-app/dist/STTC.app ]; then
-            MAC_APP_PATH=release-artifacts/macos-app/dist/STTC.app
-          else
-            echo "macOS app bundle not found under release-artifacts/macos-app"
-            find release-artifacts -maxdepth 4 -print
+          MAC_APP_PATH="$(find release-artifacts/macos-app -maxdepth 4 -type d -name '*.app' | head -n 1 || true)"
+          if [ -z "$MAC_APP_PATH" ]; then
+            MAC_APP_PATH="$(find release-artifacts -maxdepth 5 -type d -name '*.app' | head -n 1 || true)"
+          fi
+          if [ -z "$MAC_APP_PATH" ]; then
+            echo "macOS app bundle not found in downloaded artifacts"
+            find release-artifacts -maxdepth 5 -print
             exit 1
           fi
 
