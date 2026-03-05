@@ -138,12 +138,23 @@ jobs:
 
       - name: Prepare release files
         run: |
+          set -euo pipefail
           cp release-artifacts/windows-binary/sttc.exe sttc-windows-x64.exe
           cp release-artifacts/linux-appimage/sttc-linux-x64.AppImage sttc-linux-x64.AppImage
           cp release-artifacts/linux-binary/sttc sttc-linux-x64
-          cp -r release-artifacts/macos-app/STTC.app STTC.app
-          zip -r sttc-macos-x64.app.zip STTC.app
 
+          if [ -d release-artifacts/macos-app/STTC.app ]; then
+            MAC_APP_PATH=release-artifacts/macos-app/STTC.app
+          elif [ -d release-artifacts/macos-app/dist/STTC.app ]; then
+            MAC_APP_PATH=release-artifacts/macos-app/dist/STTC.app
+          else
+            echo "macOS app bundle not found under release-artifacts/macos-app"
+            find release-artifacts -maxdepth 4 -print
+            exit 1
+          fi
+
+          cp -r "$MAC_APP_PATH" STTC.app
+          zip -r sttc-macos-x64.app.zip STTC.app
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
