@@ -26,6 +26,11 @@ jobs:
       - name: Build executable
         run: uv run pyinstaller --clean sttc.spec
 
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: dist/sttc
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -97,7 +102,7 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -113,7 +118,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libportaudio2 xclip wget fuse libfuse2
+          sudo apt-get install -y libportaudio2 xclip
 
       - name: Install dependencies
         run: uv sync --all-extras --dev
@@ -121,29 +126,11 @@ jobs:
       - name: Build executable
         run: uv run pyinstaller --clean sttc.spec
 
-      - name: Build AppImage
-        run: |
-          chmod +x scripts/appimage/AppRun
-          mkdir -p AppDir/usr/bin
-          cp dist/sttc AppDir/usr/bin/sttc
-          cp scripts/appimage/AppRun AppDir/AppRun
-          cp scripts/appimage/sttc.desktop AppDir/sttc.desktop
-          cp scripts/appimage/sttc.png AppDir/sttc.png
-          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
-          chmod +x appimagetool
-          ./appimagetool AppDir sttc-linux-x64.AppImage
-
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-binary
           path: dist/sttc
-
-      - name: Upload AppImage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-appimage
-          path: sttc-linux-x64.AppImage
 
   create-release:
     runs-on: ubuntu-latest
@@ -163,9 +150,8 @@ jobs:
         run: |
           set -euo pipefail
           cp release-artifacts/windows-binary/sttc.exe sttc-windows-x64.exe
-          cp release-artifacts/linux-appimage/sttc-linux-x64.AppImage sttc-linux-x64.AppImage
           cp release-artifacts/linux-binary/sttc sttc-linux-x64
-          chmod +x sttc-linux-x64 sttc-linux-x64.AppImage
+          chmod +x sttc-linux-x64
           tar -czf sttc-linux-x64.tar.gz sttc-linux-x64
 
           MAC_APP_ZIP="release-artifacts/macos-app/STTC.app.zip"
@@ -182,6 +168,4 @@ jobs:
           files: |
             sttc-windows-x64.exe
             sttc-macos-x64.app.zip
-            sttc-linux-x64.AppImage
-            sttc-linux-x64
             sttc-linux-x64.tar.gz
