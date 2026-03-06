@@ -39,6 +39,18 @@ for package_name in ("faster_whisper", "tiktoken_ext", "pynput", "sttc"):
     except Exception:
         continue
 
+if sys.platform.startswith("linux"):
+    hiddenimports += [
+        "pynput._util.xorg",
+        "pynput._util.xorg_keysyms",
+        "pynput.keyboard._xorg",
+        "pynput.mouse._xorg",
+    ]
+    try:
+        hiddenimports += collect_submodules("Xlib")
+    except Exception:
+        pass
+
 
 a = Analysis(
     [str(ENTRYPOINT)],
