@@ -165,6 +165,8 @@ jobs:
           cp release-artifacts/windows-binary/sttc.exe sttc-windows-x64.exe
           cp release-artifacts/linux-appimage/sttc-linux-x64.AppImage sttc-linux-x64.AppImage
           cp release-artifacts/linux-binary/sttc sttc-linux-x64
+          chmod +x sttc-linux-x64 sttc-linux-x64.AppImage
+          tar -czf sttc-linux-x64.tar.gz sttc-linux-x64
 
           MAC_APP_ZIP="release-artifacts/macos-app/STTC.app.zip"
           if [ ! -f "$MAC_APP_ZIP" ]; then
@@ -182,3 +184,4 @@ jobs:
             sttc-macos-x64.app.zip
             sttc-linux-x64.AppImage
             sttc-linux-x64
+            sttc-linux-x64.tar.gz

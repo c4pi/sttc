@@ -1,5 +1,7 @@
 """CLI entrypoint for sttc."""
 
+from collections.abc import Callable
+import importlib
 import logging
 import sys
 import traceback
@@ -11,7 +13,6 @@ from rich_click import rich_click as click_config
 from tqdm import tqdm
 
 from sttc import __version__
-from sttc.app import run as run_app
 from sttc.autostart import disable_autostart, enable_autostart, is_autostart_enabled
 from sttc.first_run import run_first_launch_setup
 from sttc.settings import Settings, get_settings
@@ -55,6 +56,20 @@ def _prepare_bundled_default_command() -> None:
         sys.argv.append("run")
 
 
+def _load_run_app() -> Callable[[Settings], None]:
+    try:
+        run_app = importlib.import_module("sttc.app").run
+    except ImportError as exc:
+        if sys.platform.startswith("linux") and "pynput" in str(exc):
+            msg = (
+                "Global hotkeys are unavailable. On Linux, STTC needs the packaged pynput backend "
+                "and an active X11/XWayland session."
+            )
+            raise click.ClickException(msg) from exc
+        raise
+    return run_app
+
+
 click_config.HEADER_TEXT = "[bold cyan]sttc[/] - [dim]sttc - speech to text clipboard[/]"
 click_config.OPTIONS_PANEL_TITLE = "Options"
 click_config.COMMANDS_PANEL_TITLE = "Commands"
@@ -80,7 +95,7 @@ def cmd_run(ctx: click.Context) -> None:
     context = cast("CliContext", ctx.obj)
     settings = context["settings"]
     run_first_launch_setup(settings)
-    run_app(settings)
+    _load_run_app()(settings)
 
 
 @cli_group.command("version", help="Print the application version.")
