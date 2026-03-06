@@ -3,6 +3,7 @@
 from collections.abc import Callable
 import importlib
 import logging
+import os
 import sys
 import traceback
 from typing import TypedDict, cast
@@ -86,7 +87,10 @@ class OrderPreservingGroup(RichGroup):
 @click.pass_context
 def cli_group(ctx: click.Context, verbose: bool) -> None:
     _configure_logging(verbose=verbose)
-    ctx.obj = {"settings": get_settings()}
+    settings = get_settings()
+    if settings.openai_api_key:
+        os.environ["OPENAI_API_KEY"] = settings.openai_api_key
+    ctx.obj = {"settings": settings}
 
 
 @cli_group.command("run", help="Start hotkey recording and transcription.")
