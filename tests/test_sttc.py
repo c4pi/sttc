@@ -1,3 +1,6 @@
+import builtins
+import sys
+
 from click.testing import CliRunner
 
 from sttc import __version__
@@ -29,6 +32,22 @@ def test_cli_help() -> None:
 
 
 def test_cli_version() -> None:
+    runner = CliRunner()
+    result = runner.invoke(cli_group, ["version"])
+    assert result.exit_code == 0
+    assert __version__ in result.output
+
+
+def test_cli_version_does_not_import_app(monkeypatch) -> None:
+    sys.modules.pop("sttc.app", None)
+    real_import = builtins.__import__
+
+    def guarded_import(name: str, module_globals=None, module_locals=None, fromlist=(), level: int = 0):
+        if name == "sttc.app":
+            raise AssertionError("sttc.app should not be imported for the version command")
+        return real_import(name, module_globals, module_locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
     runner = CliRunner()
     result = runner.invoke(cli_group, ["version"])
     assert result.exit_code == 0

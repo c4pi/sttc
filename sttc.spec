@@ -33,7 +33,7 @@ except Exception:
 
 hiddenimports = []
 hiddenimports += litellm_hidden + tiktoken_hidden
-for package_name in ("faster_whisper", "tiktoken_ext"):
+for package_name in ("faster_whisper", "tiktoken_ext", "pynput"):
     try:
         hiddenimports += collect_submodules(package_name)
     except Exception:
