@@ -86,6 +86,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     debug: bool = False
     log_level: str = "INFO"
+    openai_api_key: str | None = None
 
     stt_model: str | None = None
     stt_chunk_seconds: int = Field(default=15, ge=1)

@@ -170,6 +170,7 @@ def run_first_launch_setup(settings: Settings) -> None:
             _upsert_env_var(env_path, API_KEY_ENV_KEY, api_key)
             _upsert_env_var(env_path, "STT_MODEL", DEFAULT_CLOUD_MODEL)
             os.environ[API_KEY_ENV_KEY] = api_key
+            settings.openai_api_key = api_key
             settings.stt_model = DEFAULT_CLOUD_MODEL
             cloud_enabled = True
             print(
