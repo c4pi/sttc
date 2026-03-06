@@ -88,6 +88,7 @@ jobs:
         with:
           name: macos-app
           path: ${{ steps.macos_app.outputs.app_path }}
+          if-no-files-found: error
 
   build-linux:
     runs-on: ubuntu-latest
