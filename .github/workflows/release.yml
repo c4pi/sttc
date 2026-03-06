@@ -57,49 +57,19 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
-      - name: Build CLI executable
+      - name: Build executable
         run: uv run pyinstaller --clean sttc.spec
 
-      - name: Build macOS app bundle
+      - name: Package tarball
         run: |
-          uv run pyinstaller --clean \
-            --windowed \
-            --name STTC \
-            --add-data ".env.example:." \
-            src/sttc/__main__.py
+          cd dist
+          tar -czf sttc-macos-x64.tar.gz sttc
 
-      - name: Upload binary artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-binary
-          path: dist/sttc
-
-      - name: Locate macOS app bundle
-        id: macos_app
-        shell: bash
-        run: |
-          set -euo pipefail
-          APP_PATH="$(find dist -maxdepth 2 -type d -name '*.app' | head -n 1 || true)"
-          if [ -z "$APP_PATH" ]; then
-            echo "No .app bundle found under dist"
-            find dist -maxdepth 4 -print || true
-            exit 1
-          fi
-          echo "Using app bundle: $APP_PATH"
-          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
-
-      - name: Archive macOS app bundle
-        shell: bash
-        run: |
-          set -euo pipefail
-          ditto -c -k --keepParent "${{ steps.macos_app.outputs.app_path }}" dist/STTC.app.zip
-
-      - name: Upload app bundle artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-app
-          path: dist/STTC.app.zip
-          if-no-files-found: error
+          path: dist/sttc-macos-x64.tar.gz
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -154,18 +124,11 @@ jobs:
           chmod +x sttc-linux-x64
           tar -czf sttc-linux-x64.tar.gz sttc-linux-x64
 
-          MAC_APP_ZIP="release-artifacts/macos-app/STTC.app.zip"
-          if [ ! -f "$MAC_APP_ZIP" ]; then
-            echo "macOS app archive not found in downloaded artifacts"
-            find release-artifacts -maxdepth 5 -print
-            exit 1
-          fi
-
-          cp "$MAC_APP_ZIP" sttc-macos-x64.app.zip
+          cp release-artifacts/macos-binary/sttc-macos-x64.tar.gz sttc-macos-x64.tar.gz
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             sttc-windows-x64.exe
-            sttc-macos-x64.app.zip
+            sttc-macos-x64.tar.gz
             sttc-linux-x64.tar.gz
