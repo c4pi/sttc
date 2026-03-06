@@ -79,7 +79,6 @@ def resolve_env_file_path() -> Path | str:
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=ENV_FILENAME,
         env_file_encoding="utf-8",
         extra="ignore",
     )
