@@ -51,6 +51,18 @@ if sys.platform.startswith("linux"):
     except Exception:
         pass
 
+if sys.platform == "darwin":
+    hiddenimports += [
+        "pyexpat",
+        "xml.parsers.expat",
+        "xml.etree.ElementTree",
+        "plistlib",
+    ]
+hiddenimports += [
+    "pkg_resources",
+    "pkg_resources.extern",
+]
+
 
 a = Analysis(
     [str(ENTRYPOINT)],
