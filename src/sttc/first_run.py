@@ -3,18 +3,23 @@
 from __future__ import annotations
 
 from getpass import getpass
+import importlib
 import os
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 from sttc.autostart import enable_autostart, is_autostart_enabled
 from sttc.settings import Settings, ensure_bundled_env_file, get_user_config_dir, is_bundled_executable
-from sttc.transcriber import ensure_local_model_available
 
 FIRST_RUN_MARKER = ".first_run_complete"
 AUTOSTART_ENV_KEY = "AUTO_START_ENABLED"
 API_KEY_ENV_KEY = "OPENAI_API_KEY"  # pragma: allowlist secret
 DEFAULT_CLOUD_MODEL = "openai/gpt-4o-mini-transcribe"
+
+
+def ensure_local_model_available(settings: Settings, *, announce: bool) -> None:
+    ensure_local_model_available_impl = importlib.import_module("sttc.transcriber").ensure_local_model_available
+    ensure_local_model_available_impl(settings, announce=announce)
 
 
 def _marker_path(config_dir):

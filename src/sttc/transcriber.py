@@ -8,20 +8,37 @@ import io
 import logging
 from typing import TYPE_CHECKING, Any
 
-from faster_whisper import WhisperModel
 import numpy as np
 import soundfile as sf
 
-from sttc.recorder import _resample
-
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from faster_whisper import WhisperModel
 
     from sttc.settings import Settings
 
 logger = logging.getLogger(__name__)
 
 TranscriberFn = Callable[[np.ndarray, int], str]
+
+
+def _resample(audio: np.ndarray, original_sr: int, target_sr: int) -> np.ndarray:
+    """Resample mono float audio to a target sample rate."""
+    if original_sr == target_sr:
+        return audio.astype(np.float32).reshape(-1)
+
+    if audio.size == 0:
+        return np.array([], dtype=np.float32)
+
+    duration = audio.shape[0] / float(original_sr)
+    target_samples = round(duration * target_sr)
+    if target_samples <= 1:
+        return audio.astype(np.float32).reshape(-1)
+
+    src = np.linspace(0.0, 1.0, num=audio.shape[0], endpoint=True)
+    dst = np.linspace(0.0, 1.0, num=target_samples, endpoint=True)
+    return np.interp(dst, src, audio.astype(np.float32).reshape(-1)).astype(np.float32)
 
 
 def _to_wav_bytes(audio: np.ndarray, samplerate: int) -> io.BytesIO:
@@ -120,6 +137,7 @@ def _resolve_download_root(model_cache_dir: Path | None) -> str | None:
 
 
 def _create_local_model(model_name: str, model_cache_dir: Path | None) -> WhisperModel:
+    whisper_model_cls = importlib.import_module("faster_whisper").WhisperModel
     kwargs: dict[str, Any] = {
         "model_size_or_path": model_name,
         "device": "cpu",
@@ -128,7 +146,7 @@ def _create_local_model(model_name: str, model_cache_dir: Path | None) -> Whispe
     download_root = _resolve_download_root(model_cache_dir)
     if download_root:
         kwargs["download_root"] = download_root
-    return WhisperModel(**kwargs)
+    return whisper_model_cls(**kwargs)
 
 
 def should_announce_model_download(settings: Settings) -> bool:
