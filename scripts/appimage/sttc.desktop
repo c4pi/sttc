@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=STTC
+Exec=sttc
+Icon=sttc
+Categories=Utility;
+Terminal=false

@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev --python 3.12
+
+      - name: Build executable
+        run: uv run pyinstaller --clean sttc.spec
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: dist/sttc
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binary
+          path: dist/sttc.exe
+
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install portaudio
+        run: brew install portaudio
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev --python 3.12
+
+      - name: Build executable
+        run: uv run pyinstaller --clean sttc.spec
+
+      - name: Package tarball
+        run: |
+          cd dist
+          tar -czf sttc-macos-x64.tar.gz sttc
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-binary
+          path: dist/sttc-macos-x64.tar.gz
+
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2 xclip
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev --python 3.12
+
+      - name: Build executable
+        run: uv run pyinstaller --clean sttc.spec
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: dist/sttc
+
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    needs:
+      - build-windows
+      - build-macos
+      - build-linux
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Prepare release files
+        run: |
+          set -euo pipefail
+          cp release-artifacts/windows-binary/sttc.exe sttc-windows-x64.exe
+          cp release-artifacts/linux-binary/sttc sttc-linux-x64
+          chmod +x sttc-linux-x64
+          tar -czf sttc-linux-x64.tar.gz sttc-linux-x64
+
+          cp release-artifacts/macos-binary/sttc-macos-x64.tar.gz sttc-macos-x64.tar.gz
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            sttc-windows-x64.exe
+            sttc-macos-x64.tar.gz
+            sttc-linux-x64.tar.gz
