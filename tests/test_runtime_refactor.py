@@ -54,7 +54,7 @@ def test_cli_run_calls_setup_and_app(monkeypatch) -> None:  # type: ignore[no-un
         assert isinstance(settings, Settings)
 
     monkeypatch.setattr("sttc.cli.run_first_launch_setup", fake_setup)
-    monkeypatch.setattr("sttc.cli.run_app", fake_run)
+    monkeypatch.setattr("sttc.cli._load_run_app", lambda: fake_run)
 
     runner = CliRunner()
     result = runner.invoke(cli_group, ["run"])
