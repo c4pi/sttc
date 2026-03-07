@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 TranscriberFn = Callable[[np.ndarray, int], str]
 
 
-def _resample(audio: np.ndarray, original_sr: int, target_sr: int) -> np.ndarray:
+def _resample_mono(audio: np.ndarray, original_sr: int, target_sr: int) -> np.ndarray:
     """Resample mono float audio to a target sample rate."""
     if original_sr == target_sr:
         return audio.astype(np.float32).reshape(-1)
@@ -179,7 +179,7 @@ def _build_local_transcriber(model_name: str, target_sr: int, model_cache_dir: P
     logger.info("faster-whisper ready")
 
     def transcribe(audio: np.ndarray, samplerate: int) -> str:
-        audio_target = _resample(audio, samplerate, target_sr)
+        audio_target = _resample_mono(audio, samplerate, target_sr)
         if audio_target.size == 0:
             return ""
         segments, _ = whisper_model.transcribe(audio_target, language=None)
