@@ -1,4 +1,4 @@
-"""Audio recording state and hotkey-driven capture loop."""
+﻿"""Audio recording state and hotkey-driven capture loop."""
 
 from dataclasses import dataclass, field
 import logging
@@ -76,24 +76,6 @@ class AppState:
         with self.lock:
             parts = self.transcripts.pop(session_id, [])
         return " ".join(filter(None, parts)).strip()
-
-
-def _resample(audio: np.ndarray, original_sr: int, target_sr: int) -> np.ndarray:
-    """Resample mono float audio to a target sample rate."""
-    if original_sr == target_sr:
-        return audio.astype(np.float32).reshape(-1)
-
-    if audio.size == 0:
-        return np.array([], dtype=np.float32)
-
-    duration = audio.shape[0] / float(original_sr)
-    target_samples = round(duration * target_sr)
-    if target_samples <= 1:
-        return audio.astype(np.float32).reshape(-1)
-
-    src = np.linspace(0.0, 1.0, num=audio.shape[0], endpoint=True)
-    dst = np.linspace(0.0, 1.0, num=target_samples, endpoint=True)
-    return np.interp(dst, src, audio.astype(np.float32).reshape(-1)).astype(np.float32)
 
 
 def _pick_input_samplerate(fallback: int) -> int:
