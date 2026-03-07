@@ -97,6 +97,8 @@ class Settings(BaseSettings):
     recording_mode: Literal["hold", "toggle"] = "toggle"
     recording_hotkey: str = "ctrl+shift"
     quit_hotkey: str = "ctrl+alt+q"
+    enable_gui: bool = False
+    gui_start_minimized: bool = False
 
     @field_validator("debug", mode="before")
     @classmethod

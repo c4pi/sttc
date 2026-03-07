@@ -10,6 +10,7 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_dyn
 PROJECT_ROOT = Path(globals().get("SPECPATH", ".")).resolve()
 ENTRYPOINT = PROJECT_ROOT / "src" / "sttc" / "__main__.py"
 ICON_PATH = PROJECT_ROOT / "scripts" / "appimage" / ("sttc.ico" if sys.platform == "win32" else "sttc.png")
+GUI_RESOURCES_DIR = PROJECT_ROOT / "src" / "sttc" / "gui" / "resources"
 
 binaries = []
 for package_name in ("sounddevice", "faster_whisper", "ctranslate2"):
@@ -25,6 +26,9 @@ binaries += litellm_bins + tiktoken_bins
 
 datas = [(str(PROJECT_ROOT / ".env.example"), ".")]
 datas += litellm_datas + tiktoken_datas
+if GUI_RESOURCES_DIR.exists():
+    datas.append((str(GUI_RESOURCES_DIR), "sttc/gui/resources"))
+
 # keep explicit tiktoken data inclusion for registry files
 try:
     datas += collect_data_files("tiktoken")
@@ -33,7 +37,16 @@ except Exception:
 
 hiddenimports = []
 hiddenimports += litellm_hidden + tiktoken_hidden
-for package_name in ("faster_whisper", "tiktoken_ext", "pynput", "sttc"):
+for package_name in (
+    "faster_whisper",
+    "tiktoken_ext",
+    "pynput",
+    "sttc",
+    "PySide6",
+    "PySide6.QtCore",
+    "PySide6.QtGui",
+    "PySide6.QtWidgets",
+):
     try:
         hiddenimports += collect_submodules(package_name)
     except Exception:

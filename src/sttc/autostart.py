@@ -6,7 +6,6 @@ import importlib
 from pathlib import Path
 import platform
 import plistlib
-from shlex import quote
 import sys
 
 from sttc.settings import is_bundled_executable
@@ -21,11 +20,26 @@ def _winreg_module():
     return importlib.import_module("winreg")
 
 
-def get_executable_path() -> str:
+def _append_gui_flags(command: str, *, gui: bool, minimized: bool) -> str:
+    if not gui:
+        return command
+
+    suffix = " --gui"
+    if minimized:
+        suffix += " --minimized"
+    return f"{command}{suffix}"
+
+
+def get_executable_path(*, gui: bool = False, minimized: bool = False) -> str:
     """Return the executable path or dev-mode command."""
     if is_bundled_executable():
+        if gui:
+            executable = f'"{sys.executable}" run'
+            return _append_gui_flags(executable, gui=gui, minimized=minimized)
         return sys.executable
-    return "uv run sttc run"
+
+    base_command = "uv run sttc run"
+    return _append_gui_flags(base_command, gui=gui, minimized=minimized)
 
 
 def _enable_windows_autostart(command: str) -> None:
@@ -73,7 +87,7 @@ def _is_windows_autostart_enabled() -> bool:
 
 def _macos_program_arguments(command: str) -> list[str]:
     if is_bundled_executable():
-        return [command]
+        return ["/bin/sh", "-lc", command]
     return ["/bin/sh", "-lc", command]
 
 
@@ -98,8 +112,6 @@ def _is_macos_autostart_enabled() -> bool:
 
 
 def _linux_exec_line(command: str) -> str:
-    if is_bundled_executable():
-        return quote(command)
     return command
 
 
@@ -129,9 +141,9 @@ def _is_linux_autostart_enabled() -> bool:
     return LINUX_AUTOSTART_PATH.exists()
 
 
-def enable_autostart() -> None:
+def enable_autostart(*, gui: bool = False, minimized: bool = False) -> None:
     """Enable auto-start on the current platform."""
-    command = get_executable_path()
+    command = get_executable_path(gui=gui, minimized=minimized)
     os_name = platform.system()
     if os_name == "Windows":
         _enable_windows_autostart(command)

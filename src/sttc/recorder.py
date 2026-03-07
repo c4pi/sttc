@@ -1,5 +1,6 @@
-﻿"""Audio recording state and hotkey-driven capture loop."""
+"""Audio recording state and hotkey-driven capture loop."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 import logging
 import queue
@@ -67,6 +68,10 @@ class AppState:
     def buffer_sample_count(self) -> int:
         with self.lock:
             return sum(len(chunk) for chunk in self.buffer)
+
+    def is_recording(self) -> bool:
+        with self.lock:
+            return self.recording
 
     def append_transcript(self, session_id: int, text: str) -> None:
         with self.lock:
@@ -204,6 +209,9 @@ class HotkeyListener:
         recording_mode: Literal["hold", "toggle"] = "toggle",
         hotkey: str = "ctrl+shift",
         quit_hotkey: str = "ctrl+alt+q",
+        on_session_started: Callable[[int], None] | None = None,
+        on_session_stopped: Callable[[int | None], None] | None = None,
+        on_quit: Callable[[], None] | None = None,
     ) -> None:
         self.state = state
         self.stop_event = stop_event
@@ -212,6 +220,9 @@ class HotkeyListener:
         self.quit_hotkey_keys, self.quit_hotkey_label = self._parse_hotkey(quit_hotkey)
         self.pressed_keys: set[str] = set()
         self.combo_active = False
+        self.on_session_started = on_session_started
+        self.on_session_stopped = on_session_stopped
+        self.on_quit = on_quit
 
     @classmethod
     def _canonical_name(cls, name: str) -> str:
@@ -292,8 +303,12 @@ class HotkeyListener:
             self.pressed_keys.add(key_id)
 
         if self.quit_hotkey_keys.issubset(self.pressed_keys):
-            self.state.stop_session()
+            session_id = self.state.stop_session()
+            if self.on_session_stopped is not None:
+                self.on_session_stopped(session_id)
             self.stop_event.set()
+            if self.on_quit is not None:
+                self.on_quit()
             logger.info("Stopping application (hotkey %s)", self.quit_hotkey_label)
             return False
 
@@ -304,15 +319,21 @@ class HotkeyListener:
         self.combo_active = True
         if self.recording_mode == "toggle":
             if self.state.recording:
-                self.state.stop_session()
+                session_id = self.state.stop_session()
+                if self.on_session_stopped is not None:
+                    self.on_session_stopped(session_id)
                 logger.info("Finishing transcription")
             else:
                 session = self.state.start_session()
+                if self.on_session_started is not None:
+                    self.on_session_started(session)
                 logger.info("Session %s started (toggle %s)", session, self.hotkey_label)
             return None
 
         if not self.state.recording:
             session = self.state.start_session()
+            if self.on_session_started is not None:
+                self.on_session_started(session)
             logger.info("Session %s started (hold %s)", session, self.hotkey_label)
 
         return None
@@ -327,7 +348,9 @@ class HotkeyListener:
             self.combo_active = False
 
         if self.recording_mode == "hold" and self.state.recording and not combo_pressed:
-            self.state.stop_session()
+            session_id = self.state.stop_session()
+            if self.on_session_stopped is not None:
+                self.on_session_stopped(session_id)
             logger.info("Finishing transcription")
 
         return None

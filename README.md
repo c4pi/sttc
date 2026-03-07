@@ -22,6 +22,34 @@ uv run sttc --help
 uv run sttc run
 ```
 
+Install GUI dependencies for source runs:
+
+```bash
+uv sync --extra gui
+```
+
+## GUI Mode
+
+```bash
+# Launch tiny GUI window + settings
+uv run sttc run --gui
+
+# Launch GUI hidden/minimized (tray when available)
+uv run sttc run --gui --minimized
+```
+
+Behavior:
+
+- Mini window is the main control surface (state + mic + settings).
+- Settings opens a larger dialog for model/API/hotkeys/autostart/runtime options.
+- Tray icon is optional and used when supported by the desktop session.
+- Closing the mini window hides it; app keeps running until quit.
+
+`.env` GUI keys:
+
+- `ENABLE_GUI=false`
+- `GUI_START_MINIMIZED=false`
+
 ## Linux prerequisites (Ubuntu)
 
 `uv sync` installs Python packages only. Audio/clipboard system libraries must be installed via `apt`.
@@ -40,6 +68,7 @@ sudo apt-get install -y libportaudio2 wl-clipboard
 ## First Launch
 
 When you start the bundled executable for the first time, STTC asks:
+
 - Whether auto-start on login should be enabled (`y/n`, mandatory).
 - Whether you want to configure an API key now (`y/n`, mandatory).
 

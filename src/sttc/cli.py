@@ -71,6 +71,23 @@ def _load_run_app() -> Callable[[Settings], None]:
     return run_app
 
 
+def _load_run_gui() -> Callable[[Settings, bool], None]:
+    try:
+        run_gui = importlib.import_module("sttc.gui.app").run_gui
+    except ImportError as exc:
+        if str(exc).startswith("No module named 'PySide6") or "PySide6" in str(exc):
+            msg = "GUI mode requires PySide6. Install it with: uv sync --extra gui"
+            raise click.ClickException(msg) from exc
+        if sys.platform.startswith("linux") and "pynput" in str(exc):
+            msg = (
+                "Global hotkeys are unavailable. On Linux, STTC needs the packaged pynput backend "
+                "and an active X11/XWayland session."
+            )
+            raise click.ClickException(msg) from exc
+        raise
+    return run_gui
+
+
 click_config.HEADER_TEXT = "[bold cyan]sttc[/] - [dim]sttc - speech to text clipboard[/]"
 click_config.OPTIONS_PANEL_TITLE = "Options"
 click_config.COMMANDS_PANEL_TITLE = "Commands"
@@ -94,11 +111,27 @@ def cli_group(ctx: click.Context, verbose: bool) -> None:
 
 
 @cli_group.command("run", help="Start hotkey recording and transcription.")
+@click.option("--gui", is_flag=True, help="Run with GUI mode (mini window + settings).")
+@click.option("--minimized", is_flag=True, help="Start GUI minimized/hidden.")
 @click.pass_context
-def cmd_run(ctx: click.Context) -> None:
+def cmd_run(ctx: click.Context, gui: bool, minimized: bool) -> None:
     context = cast("CliContext", ctx.obj)
     settings = context["settings"]
     run_first_launch_setup(settings)
+
+    use_gui = gui or settings.enable_gui
+    if minimized and not use_gui:
+        msg = "--minimized requires GUI mode (--gui or ENABLE_GUI=true)."
+        raise click.ClickException(msg)
+
+    start_minimized = minimized
+    if use_gui and not gui:
+        start_minimized = settings.gui_start_minimized or minimized
+
+    if use_gui:
+        _load_run_gui()(settings, start_minimized)
+        return
+
     _load_run_app()(settings)
 
 
@@ -124,6 +157,8 @@ def cmd_settings(ctx: click.Context) -> None:
     click.echo(f"recording_mode={settings.recording_mode}")
     click.echo(f"recording_hotkey={settings.recording_hotkey}")
     click.echo(f"quit_hotkey={settings.quit_hotkey}")
+    click.echo(f"enable_gui={settings.enable_gui}")
+    click.echo(f"gui_start_minimized={settings.gui_start_minimized}")
 
 
 @cli_group.group("autostart", help="Manage startup-on-login behavior.")

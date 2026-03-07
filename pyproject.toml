@@ -30,11 +30,13 @@ dependencies = [
     "pyperclip>=1.8.2",
     "litellm>=1.42.12",
 ]
+
 [project.scripts]
 sttc = "sttc.cli:main"
 
 [project.optional-dependencies]
 extras = ["ipykernel>=7.1.0"]
+gui = ["PySide6>=6.8"]
 
 [build-system]
 requires = ["hatchling"]
@@ -51,6 +53,7 @@ dev = [
     "pre-commit>=4.0.0",
     "pyinstaller>=6.0.0",
     "types-tqdm",
+    "pillow>=11.0.0",
 ]
 
 [tool.ruff]
@@ -126,6 +129,8 @@ module = [
     "sounddevice",
     "soundfile",
     "faster_whisper",
+    "PySide6",
+    "PySide6.*",
 ]
 ignore_missing_imports = true
 
