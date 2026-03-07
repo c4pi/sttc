@@ -111,10 +111,11 @@ class RuntimeController:
             logger.exception("Runtime callback failed")
 
     def _current_state(self) -> RuntimeState:
-        if self._transcribing:
-            return "transcribing"
+        # Keep the UI in "recording" while chunk transcription runs in parallel.
         if self.state.is_recording():
             return "recording"
+        if self._transcribing:
+            return "transcribing"
         return "idle"
 
     def _emit_state_if_changed(self) -> None:
@@ -290,11 +291,10 @@ class RuntimeController:
         self._safe_callback(self.on_engine_stopped)
 
     def apply_settings(self, settings: Settings, *, restart: bool = True) -> None:
-        was_running = self._started
-        if was_running and restart:
-            self.stop()
-            self.settings = settings
-            self.start()
+        self.settings = settings
+        if not restart:
             return
 
-        self.settings = settings
+        if self._started:
+            self.stop()
+        self.start()

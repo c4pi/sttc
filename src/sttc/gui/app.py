@@ -1,4 +1,4 @@
-"""Qt application entrypoint for STTC GUI mode."""
+﻿"""Qt application entrypoint for STTC GUI mode."""
 
 from __future__ import annotations
 
@@ -29,10 +29,19 @@ def run_gui(settings: Settings, minimized: bool = False) -> None:
 
     settings_window: SettingsWindow | None = None
 
+    def _on_settings_window_closed(_result: int) -> None:
+        nonlocal settings_window
+        settings_window = None
+
     def open_settings() -> None:
         nonlocal settings_window
-        if settings_window is None:
-            settings_window = SettingsWindow(bridge)
+        if settings_window is not None and settings_window.isVisible():
+            settings_window.raise_()
+            settings_window.activateWindow()
+            return
+
+        settings_window = SettingsWindow(bridge)
+        settings_window.finished.connect(_on_settings_window_closed)
         settings_window.show()
         settings_window.raise_()
         settings_window.activateWindow()

@@ -154,6 +154,14 @@ def enable_autostart(*, gui: bool = False, minimized: bool = False) -> None:
     _enable_linux_autostart(command)
 
 
+def sync_autostart(enabled: bool, *, gui: bool = False, minimized: bool = False) -> None:
+    """Create/update or remove auto-start based on desired enabled state."""
+    if enabled:
+        enable_autostart(gui=gui, minimized=minimized)
+        return
+    disable_autostart()
+
+
 def disable_autostart() -> None:
     """Disable auto-start on the current platform."""
     os_name = platform.system()

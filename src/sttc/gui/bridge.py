@@ -1,7 +1,8 @@
-"""Qt bridge for the shared runtime controller."""
+﻿"""Qt bridge for the shared runtime controller."""
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal
@@ -54,8 +55,30 @@ class STTCBridge(QObject):
     def stop_recording(self) -> None:
         self._runtime.stop_recording()
 
+    @staticmethod
+    def _set_or_clear_env(key: str, value: str | None) -> None:
+        if value is None or value == "":
+            os.environ.pop(key, None)
+            return
+        os.environ[key] = value
+
+    def _sync_runtime_env(self, settings: Settings) -> None:
+        self._set_or_clear_env("OPENAI_API_KEY", settings.openai_api_key)
+        self._set_or_clear_env("STT_MODEL", settings.stt_model)
+        self._set_or_clear_env("STT_WHISPER_MODEL", settings.stt_whisper_model)
+        self._set_or_clear_env("STT_MODEL_CACHE_DIR", settings.stt_model_cache_dir)
+        self._set_or_clear_env("RECORDING_MODE", settings.recording_mode)
+        self._set_or_clear_env("RECORDING_HOTKEY", settings.recording_hotkey)
+        self._set_or_clear_env("QUIT_HOTKEY", settings.quit_hotkey)
+        self._set_or_clear_env("STT_CHUNK_SECONDS", str(settings.stt_chunk_seconds))
+        self._set_or_clear_env("SAMPLE_RATE_TARGET", str(settings.sample_rate_target))
+        self._set_or_clear_env("CHANNELS", str(settings.channels))
+        self._set_or_clear_env("ENABLE_GUI", "true" if settings.enable_gui else "false")
+        self._set_or_clear_env("GUI_START_MINIMIZED", "true" if settings.gui_start_minimized else "false")
+
     def apply_settings(self, settings: Settings, *, restart: bool = True) -> None:
         self._settings = settings
+        self._sync_runtime_env(settings)
         self._runtime.apply_settings(settings, restart=restart)
 
     def get_settings(self) -> Settings:

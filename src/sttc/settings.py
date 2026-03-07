@@ -14,6 +14,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 APP_NAME = "sttc"
 ENV_FILENAME = ".env"
 ENV_EXAMPLE_FILENAME = ".env.example"
+WHISPER_SAMPLE_RATE = 16000
 
 
 def is_bundled_executable() -> bool:
@@ -92,7 +93,7 @@ class Settings(BaseSettings):
     stt_chunk_seconds: int = Field(default=15, ge=1)
     stt_whisper_model: str = "base"
     stt_model_cache_dir: str | None = None
-    sample_rate_target: int = Field(default=16000, ge=8000)
+    sample_rate_target: int = Field(default=WHISPER_SAMPLE_RATE, ge=8000)
     channels: int = Field(default=1, ge=1)
     recording_mode: Literal["hold", "toggle"] = "toggle"
     recording_hotkey: str = "ctrl+shift"
@@ -145,6 +146,11 @@ class Settings(BaseSettings):
         if not normalized:
             return None
         return normalized
+
+    @field_validator("sample_rate_target", mode="before")
+    @classmethod
+    def _force_whisper_sample_rate(cls, _value: object) -> int:
+        return WHISPER_SAMPLE_RATE
 
     @model_validator(mode="after")
     def _validate_hotkeys(self) -> Settings:

@@ -17,16 +17,19 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from sttc.autostart import disable_autostart, enable_autostart, is_autostart_enabled
+from sttc.autostart import is_autostart_enabled, sync_autostart
 from sttc.gui.env_editor import upsert_env_values
-from sttc.settings import Settings, get_settings
+from sttc.settings import WHISPER_SAMPLE_RATE, Settings
 
 if TYPE_CHECKING:
     from sttc.gui.bridge import STTCBridge
+
+DEFAULT_CLOUD_MODEL = "openai/gpt-4o-mini-transcribe"
 
 
 class SettingsWindow(QDialog):
@@ -53,28 +56,48 @@ class SettingsWindow(QDialog):
         root_layout.addWidget(tabs)
         root_layout.addLayout(self._build_buttons())
         self.setLayout(root_layout)
+        self._sync_transcription_mode_controls()
 
     def _build_transcription_tab(self, settings: Settings) -> QWidget:
         tab = QWidget()
         form = QFormLayout(tab)
 
-        self.stt_model_input = QLineEdit(settings.stt_model or "")
-        self.stt_model_input.setPlaceholderText("Leave empty for local faster-whisper")
+        self.backend_combo = QComboBox()
+        self.backend_combo.addItem("Cloud / OpenAI", userData="cloud")
+        self.backend_combo.addItem("Local Whisper", userData="local")
+        self.backend_combo.setCurrentIndex(0 if settings.stt_model else 1)
+        self.backend_combo.currentIndexChanged.connect(self._on_backend_changed)
+
+        self.stt_model_input = QLineEdit(settings.stt_model or DEFAULT_CLOUD_MODEL)
+        self.stt_model_input.setPlaceholderText(DEFAULT_CLOUD_MODEL)
 
         self.stt_whisper_model_input = QLineEdit(settings.stt_whisper_model)
         self.openai_api_key_input = QLineEdit(settings.openai_api_key or "")
         self.openai_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.api_key_toggle_button = QToolButton()
+        self.api_key_toggle_button.setCheckable(True)
+        self.api_key_toggle_button.setText("Show")
+        self.api_key_toggle_button.toggled.connect(self._toggle_api_key_visibility)
+
+        api_key_widget = QWidget()
+        api_key_layout = QHBoxLayout(api_key_widget)
+        api_key_layout.setContentsMargins(0, 0, 0, 0)
+        api_key_layout.addWidget(self.openai_api_key_input, 1)
+        api_key_layout.addWidget(self.api_key_toggle_button)
 
         self.model_cache_input = QLineEdit(settings.stt_model_cache_dir or "")
         self.model_cache_input.setPlaceholderText("Optional custom model cache directory")
 
+        form.addRow("Backend", self.backend_combo)
         form.addRow("Cloud Model (STT_MODEL)", self.stt_model_input)
         form.addRow("Whisper Model", self.stt_whisper_model_input)
-        form.addRow("API Key", self.openai_api_key_input)
+        form.addRow("API Key", api_key_widget)
         form.addRow("Model Cache Dir", self.model_cache_input)
 
-        hint = QLabel("Leave Cloud Model empty to use local faster-whisper.")
-        form.addRow("", hint)
+        self.transcription_hint = QLabel("")
+        self.transcription_hint.setWordWrap(True)
+        form.addRow("", self.transcription_hint)
+        self._sync_transcription_mode_controls()
         return tab
 
     def _build_hotkeys_tab(self, settings: Settings) -> QWidget:
@@ -120,21 +143,22 @@ class SettingsWindow(QDialog):
         self.chunk_seconds_input.setRange(1, 120)
         self.chunk_seconds_input.setValue(settings.stt_chunk_seconds)
 
-        self.sample_rate_input = QSpinBox()
-        self.sample_rate_input.setRange(8000, 96000)
-        self.sample_rate_input.setSingleStep(1000)
-        self.sample_rate_input.setValue(settings.sample_rate_target)
-
         self.channels_input = QSpinBox()
         self.channels_input.setRange(1, 2)
         self.channels_input.setValue(settings.channels)
 
         grid.addWidget(QLabel("Chunk Seconds"), 0, 0)
         grid.addWidget(self.chunk_seconds_input, 0, 1)
-        grid.addWidget(QLabel("Sample Rate"), 1, 0)
-        grid.addWidget(self.sample_rate_input, 1, 1)
-        grid.addWidget(QLabel("Channels"), 2, 0)
-        grid.addWidget(self.channels_input, 2, 1)
+        grid.addWidget(QLabel("Channels"), 1, 0)
+        grid.addWidget(self.channels_input, 1, 1)
+
+        sample_rate_hint = QLabel(
+            f"Whisper sample rate is fixed to {WHISPER_SAMPLE_RATE} Hz. "
+            "Recording still uses your audio device input rate (often 44100 Hz)."
+        )
+        sample_rate_hint.setWordWrap(True)
+        grid.addWidget(sample_rate_hint, 2, 0, 1, 3)
+
         grid.setColumnStretch(2, 1)
         return tab
 
@@ -143,16 +167,12 @@ class SettingsWindow(QDialog):
         layout.addStretch(1)
 
         save_button = QPushButton("Save")
-        save_button.clicked.connect(lambda: self._save(restart_engine=False))
-
-        save_restart_button = QPushButton("Save + Restart Engine")
-        save_restart_button.clicked.connect(lambda: self._save(restart_engine=True))
+        save_button.clicked.connect(self._save)
 
         cancel_button = QPushButton("Cancel")
         cancel_button.clicked.connect(self.reject)
 
         layout.addWidget(save_button)
-        layout.addWidget(save_restart_button)
         layout.addWidget(cancel_button)
         return layout
 
@@ -160,9 +180,65 @@ class SettingsWindow(QDialog):
     def _normalize_hotkey(value: str) -> str:
         return value.strip().lower().replace(" ", "")
 
+    def _on_backend_changed(self, _index: int) -> None:
+        self._sync_transcription_mode_controls()
+
+    def _toggle_api_key_visibility(self, visible: bool) -> None:
+        mode = QLineEdit.EchoMode.Normal if visible else QLineEdit.EchoMode.Password
+        self.openai_api_key_input.setEchoMode(mode)
+        self.api_key_toggle_button.setText("Hide" if visible else "Show")
+
+    def _uses_cloud_backend(self) -> bool:
+        return self.backend_combo.currentData() == "cloud"
+
+    def _selected_stt_model(self) -> str | None:
+        if not self._uses_cloud_backend():
+            return None
+        return self.stt_model_input.text().strip() or DEFAULT_CLOUD_MODEL
+
+    def _sync_transcription_mode_controls(self) -> None:
+        uses_cloud = self._uses_cloud_backend()
+        self.stt_model_input.setEnabled(uses_cloud)
+        self.openai_api_key_input.setEnabled(uses_cloud)
+        self.api_key_toggle_button.setEnabled(uses_cloud)
+        self.stt_whisper_model_input.setEnabled(not uses_cloud)
+        if not uses_cloud and self.api_key_toggle_button.isChecked():
+            self.api_key_toggle_button.setChecked(False)
+
+        if uses_cloud:
+            self.transcription_hint.setText("Cloud mode uses STT_MODEL + API Key. Whisper Model is ignored.")
+        else:
+            self.transcription_hint.setText("Local mode uses Whisper Model. Cloud model/API key are ignored.")
+
+    def _build_runtime_settings(self) -> Settings:
+        recording_mode = self.recording_mode_combo.currentText()
+        base_values = self._bridge.get_settings().model_dump()
+        base_values.update(
+            {
+                "stt_model": self._selected_stt_model(),
+                "stt_whisper_model": self.stt_whisper_model_input.text().strip() or "base",
+                "openai_api_key": self.openai_api_key_input.text().strip() or None,
+                "stt_model_cache_dir": self.model_cache_input.text().strip() or None,
+                "recording_mode": cast('Literal["hold", "toggle"]', recording_mode),
+                "recording_hotkey": self._normalize_hotkey(self.recording_hotkey_input.text()),
+                "quit_hotkey": self._normalize_hotkey(self.quit_hotkey_input.text()),
+                "enable_gui": self.enable_gui_checkbox.isChecked(),
+                "gui_start_minimized": self.gui_start_minimized_checkbox.isChecked(),
+                "stt_chunk_seconds": self.chunk_seconds_input.value(),
+                "sample_rate_target": WHISPER_SAMPLE_RATE,
+                "channels": self.channels_input.value(),
+            }
+        )
+        return Settings(**base_values)
+
     def _collect_updates(self) -> dict[str, bool | int | str | None]:
+        stt_model = ""
+        selected_model = self._selected_stt_model()
+        if selected_model is not None:
+            stt_model = selected_model
+
         return {
-            "STT_MODEL": self.stt_model_input.text().strip(),
+            "STT_MODEL": stt_model,
             "STT_WHISPER_MODEL": self.stt_whisper_model_input.text().strip() or "base",
             "OPENAI_API_KEY": self.openai_api_key_input.text().strip(),
             "STT_MODEL_CACHE_DIR": self.model_cache_input.text().strip(),
@@ -172,7 +248,7 @@ class SettingsWindow(QDialog):
             "ENABLE_GUI": self.enable_gui_checkbox.isChecked(),
             "GUI_START_MINIMIZED": self.gui_start_minimized_checkbox.isChecked(),
             "STT_CHUNK_SECONDS": self.chunk_seconds_input.value(),
-            "SAMPLE_RATE_TARGET": self.sample_rate_input.value(),
+            "SAMPLE_RATE_TARGET": WHISPER_SAMPLE_RATE,
             "CHANNELS": self.channels_input.value(),
         }
 
@@ -182,25 +258,12 @@ class SettingsWindow(QDialog):
             return False, "Recording mode must be either 'toggle' or 'hold'."
 
         try:
-            Settings(
-                stt_model=self.stt_model_input.text().strip() or None,
-                stt_whisper_model=self.stt_whisper_model_input.text().strip() or "base",
-                openai_api_key=self.openai_api_key_input.text().strip() or None,
-                stt_model_cache_dir=self.model_cache_input.text().strip() or None,
-                recording_mode=cast('Literal["hold", "toggle"]', recording_mode),
-                recording_hotkey=self._normalize_hotkey(self.recording_hotkey_input.text()),
-                quit_hotkey=self._normalize_hotkey(self.quit_hotkey_input.text()),
-                enable_gui=self.enable_gui_checkbox.isChecked(),
-                gui_start_minimized=self.gui_start_minimized_checkbox.isChecked(),
-                stt_chunk_seconds=self.chunk_seconds_input.value(),
-                sample_rate_target=self.sample_rate_input.value(),
-                channels=self.channels_input.value(),
-            )
+            self._build_runtime_settings()
         except Exception as exc:
             return False, str(exc)
         return True, ""
 
-    def _save(self, *, restart_engine: bool) -> None:
+    def _save(self) -> None:
         updates = self._collect_updates()
         valid, message = self._validate_updates()
         if not valid:
@@ -210,15 +273,24 @@ class SettingsWindow(QDialog):
         env_path = upsert_env_values(updates)
 
         wanted_autostart = self.autostart_checkbox.isChecked()
-        if wanted_autostart != self._autostart_enabled:
-            if wanted_autostart:
-                enable_autostart(gui=bool(updates["ENABLE_GUI"]), minimized=bool(updates["GUI_START_MINIMIZED"]))
-            else:
-                disable_autostart()
-            self._autostart_enabled = wanted_autostart
+        if wanted_autostart or self._autostart_enabled:
+            sync_autostart(
+                wanted_autostart,
+                gui=bool(updates["ENABLE_GUI"]),
+                minimized=bool(updates["GUI_START_MINIMIZED"]),
+            )
+        self._autostart_enabled = wanted_autostart
 
-        new_settings = get_settings()
-        self._bridge.apply_settings(new_settings, restart=restart_engine)
+        new_settings = self._build_runtime_settings()
+        try:
+            self._bridge.apply_settings(new_settings, restart=True)
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Engine Restart Failed",
+                f"Settings were saved to {env_path}, but restarting the engine failed:\n{exc}",
+            )
+            return
 
         QMessageBox.information(self, "Settings Saved", f"Settings saved to {env_path}")
         self.accept()

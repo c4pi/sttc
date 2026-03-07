@@ -117,6 +117,7 @@ def _run_cloud_transcription(*, model_name: str, wav_buffer: io.BytesIO) -> Any:
 
 def _build_cloud_transcriber(model_name: str) -> TranscriberFn:
     logger.info("Cloud transcription configured with model: %s", model_name)
+    logger.info("Cloud mode uses the microphone input sample rate from the recorder stream")
 
     def transcribe(audio: np.ndarray, samplerate: int) -> str:
         if audio.size == 0:
@@ -177,6 +178,7 @@ def _build_local_transcriber(model_name: str, target_sr: int, model_cache_dir: P
     logger.info("Loading faster-whisper model: %s", model_name)
     whisper_model = _create_local_model(model_name, model_cache_dir)
     logger.info("faster-whisper ready")
+    logger.info("Whisper will resample recorder input to target sample rate: %s Hz", target_sr)
 
     def transcribe(audio: np.ndarray, samplerate: int) -> str:
         audio_target = _resample_mono(audio, samplerate, target_sr)

@@ -28,6 +28,11 @@ def test_settings_recording_hotkey_normalizes() -> None:
     assert s.recording_hotkey == "ctrl+alt+r"
 
 
+def test_settings_sample_rate_is_fixed() -> None:
+    s = Settings(_env_file=None, sample_rate_target=44100)
+    assert s.sample_rate_target == 16000
+
+
 def test_settings_quit_hotkey_normalizes() -> None:
     s = Settings(_env_file=None, quit_hotkey=" CTRL + SHIFT + ESCAPE ")
     assert s.quit_hotkey == "ctrl+shift+escape"

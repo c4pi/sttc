@@ -132,7 +132,7 @@ def recording_loop(
                 callback=_stream_callback,
             )
             stream.start()
-            logger.info("Recording at %s Hz", samplerate)
+            logger.info("Recording at %s Hz (device input, target=%s Hz)", samplerate, sample_rate_target)
 
         if not state.recording and stream is not None:
             session_id = state.session_id
