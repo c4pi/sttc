@@ -111,17 +111,22 @@ def cli_group(ctx: click.Context, verbose: bool) -> None:
 
 
 @cli_group.command("run", help="Start hotkey recording and transcription.")
-@click.option("--gui", is_flag=True, help="Run with GUI mode (mini window + settings).")
+@click.option("--gui", is_flag=True, help="Force GUI mode (mini window + settings).")
+@click.option("--cli", "cli_mode", is_flag=True, help="Run in headless CLI mode (no GUI).")
 @click.option("--minimized", is_flag=True, help="Start GUI minimized/hidden.")
 @click.pass_context
-def cmd_run(ctx: click.Context, gui: bool, minimized: bool) -> None:
+def cmd_run(ctx: click.Context, gui: bool, cli_mode: bool, minimized: bool) -> None:
     context = cast("CliContext", ctx.obj)
     settings = context["settings"]
     run_first_launch_setup(settings)
 
-    use_gui = gui or settings.enable_gui
+    if gui and cli_mode:
+        msg = "--gui and --cli cannot be combined."
+        raise click.ClickException(msg)
+
+    use_gui = not cli_mode
     if minimized and not use_gui:
-        msg = "--minimized requires GUI mode (--gui or ENABLE_GUI=true)."
+        msg = "--minimized cannot be used with --cli."
         raise click.ClickException(msg)
 
     start_minimized = minimized

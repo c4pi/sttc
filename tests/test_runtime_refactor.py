@@ -49,25 +49,32 @@ def test_settings_hotkeys_must_differ() -> None:
         Settings(_env_file=None, recording_hotkey="ctrl+shift", quit_hotkey="ctrl+shift")
 
 
-def test_cli_run_calls_setup_and_app(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    called = {"setup": False, "run": False}
+def test_cli_run_defaults_to_gui(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    called = {"setup": False, "gui": False, "headless": False}
 
     def fake_setup(settings: Settings) -> None:
         called["setup"] = True
         assert isinstance(settings, Settings)
 
-    def fake_run(settings: Settings) -> None:
-        called["run"] = True
+    def fake_run_gui(settings: Settings, minimized: bool) -> None:
+        called["gui"] = True
         assert isinstance(settings, Settings)
+        assert minimized is False
 
+    def fake_headless(_settings: Settings) -> None:
+        called["headless"] = True
+
+    monkeypatch.setattr("sttc.cli.get_settings", lambda: Settings(_env_file=None, gui_start_minimized=False))
     monkeypatch.setattr("sttc.cli.run_first_launch_setup", fake_setup)
-    monkeypatch.setattr("sttc.cli._load_run_app", lambda: fake_run)
+    monkeypatch.setattr("sttc.cli._load_run_gui", lambda: fake_run_gui)
+    monkeypatch.setattr("sttc.cli._load_run_app", lambda: fake_headless)
 
     runner = CliRunner()
     result = runner.invoke(cli_group, ["run"])
     assert result.exit_code == 0
     assert called["setup"] is True
-    assert called["run"] is True
+    assert called["gui"] is True
+    assert called["headless"] is False
 
 
 def test_cli_run_with_gui_flag_calls_gui_app(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -83,6 +90,7 @@ def test_cli_run_with_gui_flag_calls_gui_app(monkeypatch) -> None:  # type: igno
     def fake_headless(_settings: Settings) -> None:
         called["headless"] = True
 
+    monkeypatch.setattr("sttc.cli.get_settings", lambda: Settings(_env_file=None, gui_start_minimized=False))
     monkeypatch.setattr("sttc.cli.run_first_launch_setup", fake_setup)
     monkeypatch.setattr("sttc.cli._load_run_gui", lambda: fake_run_gui)
     monkeypatch.setattr("sttc.cli._load_run_app", lambda: fake_headless)
@@ -95,11 +103,11 @@ def test_cli_run_with_gui_flag_calls_gui_app(monkeypatch) -> None:  # type: igno
     assert called["headless"] is False
 
 
-def test_cli_run_uses_enable_gui_setting(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_cli_run_uses_gui_start_minimized_setting(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     called = {"gui": False}
 
     def fake_get_settings() -> Settings:
-        return Settings(_env_file=None, enable_gui=True, gui_start_minimized=True)
+        return Settings(_env_file=None, gui_start_minimized=True)
 
     def fake_setup(_settings: Settings) -> None:
         return
@@ -118,14 +126,47 @@ def test_cli_run_uses_enable_gui_setting(monkeypatch) -> None:  # type: ignore[n
     assert called["gui"] is True
 
 
-def test_cli_run_minimized_requires_gui(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_cli_run_cli_flag_calls_headless_app(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    called = {"setup": False, "gui": False, "headless": False}
+
+    def fake_setup(_settings: Settings) -> None:
+        called["setup"] = True
+
+    def fake_run_gui(_settings: Settings, minimized: bool) -> None:
+        called["gui"] = True
+
+    def fake_headless(_settings: Settings) -> None:
+        called["headless"] = True
+
+    monkeypatch.setattr("sttc.cli.get_settings", lambda: Settings(_env_file=None, gui_start_minimized=False))
+    monkeypatch.setattr("sttc.cli.run_first_launch_setup", fake_setup)
+    monkeypatch.setattr("sttc.cli._load_run_gui", lambda: fake_run_gui)
+    monkeypatch.setattr("sttc.cli._load_run_app", lambda: fake_headless)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_group, ["run", "--cli"])
+    assert result.exit_code == 0
+    assert called["setup"] is True
+    assert called["gui"] is False
+    assert called["headless"] is True
+
+
+def test_cli_run_rejects_gui_and_cli_combination(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setattr("sttc.cli.run_first_launch_setup", lambda _settings: None)
 
     runner = CliRunner()
-    result = runner.invoke(cli_group, ["run", "--minimized"])
+    result = runner.invoke(cli_group, ["run", "--gui", "--cli"])
     assert result.exit_code != 0
-    assert "requires GUI mode" in result.output
+    assert "cannot be combined" in result.output
 
+
+def test_cli_run_minimized_rejects_cli(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr("sttc.cli.run_first_launch_setup", lambda _settings: None)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_group, ["run", "--cli", "--minimized"])
+    assert result.exit_code != 0
+    assert "cannot be used with --cli" in result.output
 
 def test_cli_autostart_enable(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     called = {"value": False}

@@ -31,11 +31,14 @@ uv sync --extra gui
 ## GUI Mode
 
 ```bash
-# Launch tiny GUI window + settings
-uv run sttc run --gui
+# Launch tiny GUI window + settings (default)
+uv run sttc run
 
 # Launch GUI hidden/minimized (tray when available)
-uv run sttc run --gui --minimized
+uv run sttc run --minimized
+
+# Optional advanced/headless mode (no GUI)
+uv run sttc run --cli
 ```
 
 Behavior:
