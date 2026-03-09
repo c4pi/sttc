@@ -28,10 +28,10 @@ Install GUI dependencies for source runs:
 uv sync --extra gui
 ```
 
-## GUI Mode
+## GUI-First Run Mode
 
 ```bash
-# Launch tiny GUI window + settings (default)
+# Default on all desktop platforms: opens mini GUI + settings
 uv run sttc run
 
 # Launch GUI hidden/minimized (tray when available)
@@ -43,6 +43,7 @@ uv run sttc run --cli
 
 Behavior:
 
+- `sttc run` is GUI-first by default.
 - Mini window is the main control surface (state + mic + settings).
 - Settings opens a larger dialog for model/API/hotkeys/autostart/runtime options.
 - Tray icon is optional and used when supported by the desktop session.
@@ -97,11 +98,29 @@ uv run sttc autostart disable
 uv run sttc autostart status
 ```
 
+Behavior:
+
+- Autostart triggers when your desktop login session starts.
+- Screen lock/unlock does not trigger autostart (`Win + L` on Windows is lock, not logout/login).
+- If autostart is enabled and GUI/minimized preferences change in Settings, STTC rewrites the autostart command to match current preferences.
+
+## Advanced CLI Mode
+
+Use CLI mode for diagnostics, scripting, or headless usage:
+
+```bash
+uv run sttc run --cli
+```
+
 ## Build Native Executable
 
 ```bash
 uv run python scripts/build.py
 ```
+
+Build artifact:
+
+- `dist/sttc` (`dist/sttc.exe` on Windows): GUI-first binary (no terminal window on Windows).
 
 ## Development checks
 

@@ -209,6 +209,7 @@ class HotkeyListener:
         recording_mode: Literal["hold", "toggle"] = "toggle",
         hotkey: str = "ctrl+shift",
         quit_hotkey: str = "ctrl+alt+q",
+        can_start_recording: Callable[[], bool] | None = None,
         on_session_started: Callable[[int], None] | None = None,
         on_session_stopped: Callable[[int | None], None] | None = None,
         on_quit: Callable[[], None] | None = None,
@@ -220,6 +221,7 @@ class HotkeyListener:
         self.quit_hotkey_keys, self.quit_hotkey_label = self._parse_hotkey(quit_hotkey)
         self.pressed_keys: set[str] = set()
         self.combo_active = False
+        self.can_start_recording = can_start_recording
         self.on_session_started = on_session_started
         self.on_session_stopped = on_session_stopped
         self.on_quit = on_quit
@@ -324,6 +326,8 @@ class HotkeyListener:
                     self.on_session_stopped(session_id)
                 logger.info("Finishing transcription")
             else:
+                if self.can_start_recording is not None and not self.can_start_recording():
+                    return None
                 session = self.state.start_session()
                 if self.on_session_started is not None:
                     self.on_session_started(session)
@@ -331,6 +335,8 @@ class HotkeyListener:
             return None
 
         if not self.state.recording:
+            if self.can_start_recording is not None and not self.can_start_recording():
+                return None
             session = self.state.start_session()
             if self.on_session_started is not None:
                 self.on_session_started(session)

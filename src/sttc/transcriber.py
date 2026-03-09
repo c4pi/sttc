@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 import importlib
 import io
 import logging
+import os
+from pathlib import Path
+import shutil
+import sys
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import soundfile as sf
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from faster_whisper import WhisperModel
 
     from sttc.settings import Settings
@@ -21,6 +24,28 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 TranscriberFn = Callable[[np.ndarray, int], str]
+EngineStatusChangedFn = Callable[[str], None]
+
+def _should_disable_hf_download_progress() -> bool:
+    return sys.stdout is None or sys.stderr is None
+
+
+
+@contextmanager
+def _temporarily_disable_hf_download_progress() -> Iterator[None]:
+    if not _should_disable_hf_download_progress():
+        yield
+        return
+
+    previous = os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS")
+    os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("HF_HUB_DISABLE_PROGRESS_BARS", None)
+        else:
+            os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = previous
 
 
 def _resample_mono(audio: np.ndarray, original_sr: int, target_sr: int) -> np.ndarray:
@@ -137,27 +162,132 @@ def _resolve_download_root(model_cache_dir: Path | None) -> str | None:
     return str(model_cache_dir)
 
 
-def _create_local_model(model_name: str, model_cache_dir: Path | None) -> WhisperModel:
-    whisper_model_cls = importlib.import_module("faster_whisper").WhisperModel
-    kwargs: dict[str, Any] = {
-        "model_size_or_path": model_name,
-        "device": "cpu",
-        "compute_type": "int8",
-    }
+def _cache_repo_dir(model_name: str, model_cache_dir: Path | None) -> Path | None:
+    if model_cache_dir is None:
+        return None
+    if "/" in model_name:
+        owner, repo = model_name.split("/", maxsplit=1)
+        repo_folder = f"models--{owner}--{repo}"
+    else:
+        repo_folder = f"models--Systran--faster-whisper-{model_name}"
+    return model_cache_dir / repo_folder
+
+
+def _cache_lock_dir(model_name: str, model_cache_dir: Path | None) -> Path | None:
+    repo_dir = _cache_repo_dir(model_name, model_cache_dir)
+    if repo_dir is None or model_cache_dir is None:
+        return None
+    return model_cache_dir / ".locks" / repo_dir.name
+
+
+def _is_local_model_snapshot(path: Path) -> bool:
+    required_files = ("config.json", "model.bin", "tokenizer.json")
+    return path.is_dir() and all((path / filename).exists() for filename in required_files)
+
+
+def _resolve_cached_snapshot_dir(model_name: str, model_cache_dir: Path | None) -> Path | None:
+    repo_dir = _cache_repo_dir(model_name, model_cache_dir)
+    if repo_dir is None or not repo_dir.exists():
+        return None
+
+    refs_main = repo_dir / "refs" / "main"
+    if refs_main.exists():
+        snapshot_name = refs_main.read_text(encoding="utf-8").strip()
+        if snapshot_name:
+            candidate = repo_dir / "snapshots" / snapshot_name
+            if _is_local_model_snapshot(candidate):
+                return candidate
+
+    snapshots_dir = repo_dir / "snapshots"
+    if not snapshots_dir.exists():
+        return None
+
+    for candidate in sorted(snapshots_dir.iterdir(), reverse=True):
+        if _is_local_model_snapshot(candidate):
+            return candidate
+    return None
+
+
+def _clear_incomplete_model_cache(model_name: str, model_cache_dir: Path | None) -> None:
+    repo_dir = _cache_repo_dir(model_name, model_cache_dir)
+    if repo_dir is None or not repo_dir.exists():
+        return
+    if _resolve_cached_snapshot_dir(model_name, model_cache_dir) is not None:
+        return
+
+    logger.warning("Removing incomplete faster-whisper cache repo: %s", repo_dir)
+    shutil.rmtree(repo_dir)
+
+    lock_dir = _cache_lock_dir(model_name, model_cache_dir)
+    if lock_dir is not None and lock_dir.exists():
+        logger.info("Removing stale faster-whisper cache lock directory: %s", lock_dir)
+        shutil.rmtree(lock_dir)
+
+
+def _download_local_model(model_name: str, model_cache_dir: Path | None) -> Path:
+    download_model = importlib.import_module("faster_whisper").download_model
+    kwargs: dict[str, Any] = {}
     download_root = _resolve_download_root(model_cache_dir)
     if download_root:
-        kwargs["download_root"] = download_root
-    return whisper_model_cls(**kwargs)
+        kwargs["cache_dir"] = download_root
+    if _should_disable_hf_download_progress():
+        logger.info("Disabling Hugging Face progress bars because no console streams are available")
+    with _temporarily_disable_hf_download_progress():
+        model_path = Path(download_model(model_name, **kwargs))
+    if not _is_local_model_snapshot(model_path):
+        msg = f"Downloaded Whisper model is incomplete: {model_path}"
+        raise RuntimeError(msg)
+    return model_path
+
+
+def _emit_engine_status(status_callback: EngineStatusChangedFn | None, message: str) -> None:
+    if status_callback is not None:
+        status_callback(message)
+
+
+def _create_local_model(
+    model_name: str,
+    model_cache_dir: Path | None,
+    *,
+    status_callback: EngineStatusChangedFn | None = None,
+) -> WhisperModel:
+    whisper_model_cls = importlib.import_module("faster_whisper").WhisperModel
+    logger.info(
+        "Whisper model cache root: %s",
+        model_cache_dir if model_cache_dir is not None else "huggingface_hub default cache",
+    )
+    repo_dir = _cache_repo_dir(model_name, model_cache_dir)
+    if repo_dir is not None:
+        logger.info("Whisper model cache repo: %s", repo_dir)
+
+    model_path = _resolve_cached_snapshot_dir(model_name, model_cache_dir)
+    if model_path is None:
+        if repo_dir is not None and repo_dir.exists():
+            _emit_engine_status(status_callback, "Repairing incomplete Whisper cache...")
+            _clear_incomplete_model_cache(model_name, model_cache_dir)
+        _emit_engine_status(status_callback, "Downloading Whisper model... This can take a moment on first start.")
+        logger.info("Downloading faster-whisper model: %s", model_name)
+        model_path = _download_local_model(model_name, model_cache_dir)
+        logger.info("Downloaded faster-whisper model snapshot: %s", model_path)
+    else:
+        logger.info("Using cached faster-whisper model snapshot: %s", model_path)
+
+    _emit_engine_status(status_callback, "Starting Whisper engine...")
+    return whisper_model_cls(
+        model_size_or_path=str(model_path),
+        device="cpu",
+        compute_type="int8",
+    )
 
 
 def should_announce_model_download(settings: Settings) -> bool:
-    """Return True when local model cache appears empty and setup is first-time."""
+    """Return True when the configured local Whisper model is not cached yet."""
+    if settings.stt_model:
+        return False
     model_cache_dir = settings.model_cache_dir
     if model_cache_dir is None:
         return False
-    if not model_cache_dir.exists():
-        return True
-    return not any(model_cache_dir.iterdir())
+    return _resolve_cached_snapshot_dir(settings.stt_whisper_model, model_cache_dir) is None
 
 
 def ensure_local_model_available(settings: Settings, *, announce: bool) -> None:
@@ -174,9 +304,19 @@ def ensure_local_model_available(settings: Settings, *, announce: bool) -> None:
     )
 
 
-def _build_local_transcriber(model_name: str, target_sr: int, model_cache_dir: Path | None) -> TranscriberFn:
+def _build_local_transcriber(
+    model_name: str,
+    target_sr: int,
+    model_cache_dir: Path | None,
+    *,
+    status_callback: EngineStatusChangedFn | None = None,
+) -> TranscriberFn:
     logger.info("Loading faster-whisper model: %s", model_name)
-    whisper_model = _create_local_model(model_name, model_cache_dir)
+    whisper_model = _create_local_model(
+        model_name,
+        model_cache_dir,
+        status_callback=status_callback,
+    )
     logger.info("faster-whisper ready")
     logger.info("Whisper will resample recorder input to target sample rate: %s Hz", target_sr)
 
@@ -190,7 +330,11 @@ def _build_local_transcriber(model_name: str, target_sr: int, model_cache_dir: P
     return transcribe
 
 
-def build_transcriber(settings: Settings) -> TranscriberFn:
+def build_transcriber(
+    settings: Settings,
+    *,
+    status_callback: EngineStatusChangedFn | None = None,
+) -> TranscriberFn:
     """Build the selected transcription function."""
     if settings.stt_model:
         return _build_cloud_transcriber(settings.stt_model)
@@ -199,4 +343,5 @@ def build_transcriber(settings: Settings) -> TranscriberFn:
         model_name=settings.stt_whisper_model,
         target_sr=settings.sample_rate_target,
         model_cache_dir=settings.model_cache_dir,
+        status_callback=status_callback,
     )

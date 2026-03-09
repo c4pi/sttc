@@ -29,6 +29,14 @@ def test_ask_yes_no_retries_until_valid_no(monkeypatch) -> None:  # type: ignore
     assert first_run._ask_yes_no("prompt") is False
 
 
+def test_ask_yes_no_lost_stdin_returns_none(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    def _raise_runtime(_prompt: str) -> str:
+        raise RuntimeError("lost sys.stdin")
+
+    monkeypatch.setattr("builtins.input", _raise_runtime)
+
+    assert first_run._ask_yes_no("prompt") is None
+
 
 def test_ask_api_key_retries_until_valid(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     entries = iter(["bad-key", "sk-valid"])
@@ -48,6 +56,38 @@ def test_ask_api_key_allows_skip_after_invalid(monkeypatch) -> None:  # type: ig
 
     assert first_run._ask_api_key() == ""
 
+
+def test_run_first_launch_setup_no_stdin_completes_noninteractive(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    env_path = tmp_path / ".env"
+
+    monkeypatch.setattr(first_run, "is_bundled_executable", lambda: True)
+    monkeypatch.setattr(first_run, "get_user_config_dir", lambda: tmp_path)
+    monkeypatch.setattr(first_run, "ensure_bundled_env_file", lambda: (env_path, False))
+    monkeypatch.setattr(first_run, "is_autostart_enabled", lambda: True)
+    monkeypatch.setattr(first_run, "_has_interactive_stdin", lambda: False)
+    monkeypatch.setattr(
+        first_run,
+        "_ask_yes_no",
+        lambda _prompt: (_ for _ in ()).throw(AssertionError("Should not prompt without stdin")),
+    )
+
+    settings = Settings(
+        _env_file=None,
+        stt_model=first_run.DEFAULT_CLOUD_MODEL,
+        openai_api_key="sk-configured", # pragma: allowlist secret
+    )
+    first_run.run_first_launch_setup(settings)
+
+    marker_path = tmp_path / first_run.FIRST_RUN_MARKER
+    assert marker_path.exists()
+    marker_content = marker_path.read_text(encoding="utf-8")
+    assert "autostart=enabled" in marker_content
+    assert "cloud_transcription=enabled" in marker_content
+
+    env_content = env_path.read_text(encoding="utf-8")
+    assert "AUTO_START_ENABLED=true" in env_content
+
+
 def test_run_first_launch_setup_no_choice_asks_again_next_time(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     env_path = tmp_path / ".env"
 
@@ -55,6 +95,7 @@ def test_run_first_launch_setup_no_choice_asks_again_next_time(tmp_path: Path, m
     monkeypatch.setattr(first_run, "get_user_config_dir", lambda: tmp_path)
     monkeypatch.setattr(first_run, "ensure_bundled_env_file", lambda: (env_path, False))
     monkeypatch.setattr(first_run, "is_autostart_enabled", lambda: False)
+    monkeypatch.setattr(first_run, "_has_interactive_stdin", lambda: True)
     monkeypatch.setattr(first_run, "_ask_yes_no", _yes_no_answers(None))
 
     first_run.run_first_launch_setup(Settings(_env_file=None, stt_model=None))
@@ -74,6 +115,7 @@ def test_run_first_launch_setup_no_api_key_downloads_local_model(tmp_path: Path,
     monkeypatch.setattr(first_run, "get_user_config_dir", lambda: tmp_path)
     monkeypatch.setattr(first_run, "ensure_bundled_env_file", lambda: (env_path, False))
     monkeypatch.setattr(first_run, "is_autostart_enabled", lambda: False)
+    monkeypatch.setattr(first_run, "_has_interactive_stdin", lambda: True)
     monkeypatch.setattr(first_run, "_ask_yes_no", _yes_no_answers(False, False))
     monkeypatch.setattr(first_run, "ensure_local_model_available", _mark_model)
 
@@ -108,6 +150,7 @@ def test_run_first_launch_setup_with_api_key_enables_cloud(tmp_path: Path, monke
     monkeypatch.setattr(first_run, "get_user_config_dir", lambda: tmp_path)
     monkeypatch.setattr(first_run, "ensure_bundled_env_file", lambda: (env_path, False))
     monkeypatch.setattr(first_run, "is_autostart_enabled", lambda: False)
+    monkeypatch.setattr(first_run, "_has_interactive_stdin", lambda: True)
     monkeypatch.setattr(first_run, "_ask_yes_no", _yes_no_answers(True, True))
     monkeypatch.setattr(first_run, "_ask_api_key", lambda: "sk-test-123")
     monkeypatch.setattr(first_run, "enable_autostart", _enable_autostart)

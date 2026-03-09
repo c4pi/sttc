@@ -5,6 +5,7 @@ from __future__ import annotations
 from getpass import getpass
 import importlib
 import os
+import sys
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
@@ -26,11 +27,22 @@ def _marker_path(config_dir):
     return config_dir / FIRST_RUN_MARKER
 
 
+def _has_interactive_stdin() -> bool:
+    stdin = sys.stdin
+    if stdin is None or stdin.closed:
+        return False
+    try:
+        stdin.read(0)
+    except (OSError, ValueError, RuntimeError):
+        return False
+    return True
+
+
 def _ask_yes_no(prompt: str) -> bool | None:
     while True:
         try:
             response = input(prompt).strip().lower()
-        except (EOFError, KeyboardInterrupt):
+        except (EOFError, KeyboardInterrupt, RuntimeError):
             print("No choice captured. STTC will ask again on next launch.", flush=True)
             return None
 
@@ -69,7 +81,7 @@ def _ask_api_key() -> str | None:
     while True:
         try:
             value = getpass("Enter your API key (or type 'skip'): ").strip()
-        except (EOFError, KeyboardInterrupt):
+        except (EOFError, KeyboardInterrupt, RuntimeError):
             print("No API key captured. STTC will ask again on next launch.", flush=True)
             return None
 
@@ -120,6 +132,17 @@ def _write_first_run_marker(marker_path, *, autostart_enabled: bool, cloud_enabl
     )
 
 
+def _complete_noninteractive_first_run(settings: Settings, *, env_path, marker_path) -> None:
+    autostart_enabled = is_autostart_enabled()
+    cloud_enabled = bool(settings.openai_api_key and settings.stt_model)
+    _upsert_env_var(env_path, AUTOSTART_ENV_KEY, "true" if autostart_enabled else "false")
+    _write_first_run_marker(
+        marker_path,
+        autostart_enabled=autostart_enabled,
+        cloud_enabled=cloud_enabled,
+    )
+
+
 def run_first_launch_setup(settings: Settings) -> None:
     """Run first-launch setup; no-op for development execution."""
     if not is_bundled_executable():
@@ -136,10 +159,16 @@ def run_first_launch_setup(settings: Settings) -> None:
     if marker_path.exists():
         return
 
+    if not _has_interactive_stdin():
+        _complete_noninteractive_first_run(settings, env_path=env_path, marker_path=marker_path)
+        return
+
     autostart_enabled = is_autostart_enabled()
     if not autostart_enabled:
         autostart_choice = _ask_yes_no("Enable STTC auto-start on login? [y/n]: ")
         if autostart_choice is None:
+            if not _has_interactive_stdin():
+                _complete_noninteractive_first_run(settings, env_path=env_path, marker_path=marker_path)
             return
 
         if autostart_choice:
@@ -158,12 +187,16 @@ def run_first_launch_setup(settings: Settings) -> None:
 
     has_api_key = _ask_yes_no("Do you have an AI API key now (for cloud transcription)? [y/n]: ")
     if has_api_key is None:
+        if not _has_interactive_stdin():
+            _complete_noninteractive_first_run(settings, env_path=env_path, marker_path=marker_path)
         return
 
     cloud_enabled = False
     if has_api_key:
         api_key = _ask_api_key()
         if api_key is None:
+            if not _has_interactive_stdin():
+                _complete_noninteractive_first_run(settings, env_path=env_path, marker_path=marker_path)
             return
 
         if api_key:

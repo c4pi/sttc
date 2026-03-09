@@ -100,6 +100,24 @@ def test_custom_hotkey_ctrl_alt_r_toggle_mode() -> None:
     assert state.recording is False
 
 
+def test_hotkey_respects_engine_readiness_gate() -> None:
+    state = AppState()
+    stop_event = threading.Event()
+    calls = {"count": 0}
+
+    def _can_start() -> bool:
+        calls["count"] += 1
+        return False
+
+    listener = HotkeyListener(state, stop_event, recording_mode="toggle", can_start_recording=_can_start)
+
+    listener.on_press(keyboard.Key.ctrl_l)
+    listener.on_press(keyboard.Key.shift_l)
+
+    assert calls["count"] == 1
+    assert state.recording is False
+
+
 def test_invalid_hotkey_raises_value_error() -> None:
     state = AppState()
     stop_event = threading.Event()

@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(globals().get("SPECPATH", ".")).resolve()
 ENTRYPOINT = PROJECT_ROOT / "src" / "sttc" / "__main__.py"
 ICON_PATH = PROJECT_ROOT / "scripts" / "appimage" / ("sttc.ico" if sys.platform == "win32" else "sttc.png")
 GUI_RESOURCES_DIR = PROJECT_ROOT / "src" / "sttc" / "gui" / "resources"
+RUNTIME_HOOK = PROJECT_ROOT / "scripts" / "pyinstaller_runtime_hook.py"
 
 binaries = []
 for package_name in ("sounddevice", "faster_whisper", "ctranslate2"):
@@ -21,31 +22,46 @@ for package_name in ("sounddevice", "faster_whisper", "ctranslate2"):
 
 litellm_datas, litellm_bins, litellm_hidden = collect_all("litellm")
 tiktoken_datas, tiktoken_bins, tiktoken_hidden = collect_all("tiktoken")
+try:
+    hf_xet_datas, hf_xet_bins, hf_xet_hidden = collect_all("hf_xet")
+except Exception:
+    hf_xet_datas, hf_xet_bins, hf_xet_hidden = [], [], []
 
-binaries += litellm_bins + tiktoken_bins
+binaries += litellm_bins + tiktoken_bins + hf_xet_bins
 
 datas = [(str(PROJECT_ROOT / ".env.example"), ".")]
-datas += litellm_datas + tiktoken_datas
+datas += litellm_datas + tiktoken_datas + hf_xet_datas
 if GUI_RESOURCES_DIR.exists():
     datas.append((str(GUI_RESOURCES_DIR), "sttc/gui/resources"))
 
-# keep explicit tiktoken data inclusion for registry files
 try:
     datas += collect_data_files("tiktoken")
 except Exception:
     pass
 
 hiddenimports = []
-hiddenimports += litellm_hidden + tiktoken_hidden
+hiddenimports += litellm_hidden + tiktoken_hidden + hf_xet_hidden
+hiddenimports += [
+    "PySide6.QtCore",
+    "PySide6.QtGui",
+    "PySide6.QtWidgets",
+    "pkg_resources",
+    "sttc.app",
+    "sttc.gui.app",
+    "sttc.gui.bridge",
+    "sttc.gui.env_editor",
+    "sttc.gui.mini_window",
+    "sttc.gui.settings_window",
+    "sttc.gui.tray",
+    "sttc.recorder",
+    "sttc.runtime",
+    "sttc.transcriber",
+    "tiktoken_ext.openai_public",
+]
 for package_name in (
     "faster_whisper",
     "tiktoken_ext",
     "pynput",
-    "sttc",
-    "PySide6",
-    "PySide6.QtCore",
-    "PySide6.QtGui",
-    "PySide6.QtWidgets",
 ):
     try:
         hiddenimports += collect_submodules(package_name)
@@ -66,16 +82,11 @@ if sys.platform.startswith("linux"):
 
 if sys.platform == "darwin":
     hiddenimports += [
-        "pyexpat",
-        "xml.parsers.expat",
-        "xml.etree.ElementTree",
         "plistlib",
+        "pyexpat",
+        "xml.etree.ElementTree",
+        "xml.parsers.expat",
     ]
-hiddenimports += [
-    "pkg_resources",
-    "pkg_resources.extern",
-]
-
 
 a = Analysis(
     [str(ENTRYPOINT)],
@@ -85,8 +96,18 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
-    excludes=[],
+    runtime_hooks=[str(RUNTIME_HOOK)] if RUNTIME_HOOK.exists() else [],
+    excludes=[
+        "IPython",
+        "_pytest",
+        "ipykernel",
+        "jupyter_client",
+        "jupyter_core",
+        "mypy",
+        "pytest",
+        "PySide6.scripts",
+        "tkinter",
+    ],
     noarchive=False,
 )
 pyz = PYZ(a.pure)
@@ -94,21 +115,30 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="sttc",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
     icon=str(ICON_PATH) if ICON_PATH.exists() else None,
+    console=False,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="sttc",
 )

@@ -16,7 +16,7 @@ from tqdm import tqdm
 from sttc import __version__
 from sttc.autostart import disable_autostart, enable_autostart, is_autostart_enabled
 from sttc.first_run import run_first_launch_setup
-from sttc.settings import Settings, get_settings
+from sttc.settings import Settings, get_settings, get_user_config_dir, is_bundled_executable
 
 
 class CliContext(TypedDict):
@@ -33,16 +33,25 @@ class _TqdmLoggingHandler(logging.Handler):
 
 
 def _configure_logging(*, verbose: bool) -> None:
-    handler = _TqdmLoggingHandler()
-    handler.setFormatter(
-        logging.Formatter(
-            fmt="%(asctime)s - %(levelname)s - %(message)s",
-            datefmt="%H:%M:%S",
-        )
+    formatter = logging.Formatter(
+        fmt="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%H:%M:%S",
     )
+
+    handler = _TqdmLoggingHandler()
+    handler.setFormatter(formatter)
+
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
+
+    if is_bundled_executable():
+        log_dir = get_user_config_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_dir / "sttc.log", encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        root.addHandler(file_handler)
+
     root.setLevel(logging.DEBUG if verbose else logging.INFO)
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
@@ -50,6 +59,17 @@ def _configure_logging(*, verbose: bool) -> None:
 def _is_bundled_runtime() -> bool:
     return getattr(sys, "_MEIPASS", None) is not None
 
+
+
+def _can_read_stdin() -> bool:
+    stdin = sys.stdin
+    if stdin is None or stdin.closed:
+        return False
+    try:
+        stdin.read(0)
+    except (OSError, ValueError, RuntimeError):
+        return False
+    return True
 
 def _prepare_bundled_default_command() -> None:
     # Double-clicking bundled sttc.exe provides no args; default to interactive run mode.
@@ -196,7 +216,8 @@ def main() -> None:
     except Exception:
         if _is_bundled_runtime():
             traceback.print_exc()
-            input("STTC crashed. Press Enter to exit...")
+            if _can_read_stdin():
+                input("STTC crashed. Press Enter to exit...")
         raise
 
 

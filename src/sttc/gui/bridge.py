@@ -1,4 +1,4 @@
-﻿"""Qt bridge for the shared runtime controller."""
+"""Qt bridge for the shared runtime controller."""
 
 from __future__ import annotations
 
@@ -21,6 +21,8 @@ class STTCBridge(QObject):
     error_occurred = Signal(str)
     quit_requested = Signal()
     engine_running_changed = Signal(bool)
+    engine_ready_changed = Signal(bool)
+    engine_status_changed = Signal(str)
 
     def __init__(self, settings: Settings) -> None:
         super().__init__()
@@ -34,6 +36,8 @@ class STTCBridge(QObject):
             on_stop_requested=self.quit_requested.emit,
             on_engine_started=lambda: self.engine_running_changed.emit(True),
             on_engine_stopped=lambda: self.engine_running_changed.emit(False),
+            on_engine_ready_changed=self.engine_ready_changed.emit,
+            on_engine_status_changed=self.engine_status_changed.emit,
         )
 
     def _on_transcription(self, text: str) -> None:

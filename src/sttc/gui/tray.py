@@ -30,14 +30,16 @@ class STTCTray(QSystemTrayIcon):
         super().__init__(parent)
         self._bridge = bridge
         self._mini_window = mini_window
+        self._engine_ready = False
 
-        self._status_action = QAction("Status: Idle", self)
+        self._status_action = QAction("Status: Preparing", self)
         self._status_action.setEnabled(False)
 
         self._toggle_window_action = QAction("Hide Mini Window", self)
         self._toggle_window_action.triggered.connect(self._mini_window.toggle_visibility)
 
         self._record_action = QAction("Start Recording", self)
+        self._record_action.setEnabled(False)
         self._record_action.triggered.connect(self._bridge.toggle_recording)
 
         self._settings_action = QAction("Settings", self)
@@ -50,28 +52,31 @@ class STTCTray(QSystemTrayIcon):
         self._quit_action = QAction("Quit", self)
         self._quit_action.triggered.connect(self._quit_requested)
 
-        menu = QMenu()
-        menu.addAction(self._status_action)
-        menu.addSeparator()
-        menu.addAction(self._toggle_window_action)
-        menu.addAction(self._record_action)
-        menu.addAction(self._settings_action)
-        menu.addSeparator()
-        menu.addAction(self._autostart_action)
-        menu.addSeparator()
-        menu.addAction(self._quit_action)
+        self._menu = QMenu()
+        self._menu.addAction(self._status_action)
+        self._menu.addSeparator()
+        self._menu.addAction(self._toggle_window_action)
+        self._menu.addAction(self._record_action)
+        self._menu.addAction(self._settings_action)
+        self._menu.addSeparator()
+        self._menu.addAction(self._autostart_action)
+        self._menu.addSeparator()
+        self._menu.addAction(self._quit_action)
 
-        menu.aboutToShow.connect(self._refresh_menu)
+        self._menu.aboutToShow.connect(self._refresh_menu)
 
-        self.setContextMenu(menu)
+        self.setContextMenu(self._menu)
         self.activated.connect(self._on_activated)
 
         self._bridge.state_changed.connect(self._on_state_changed)
+        self._bridge.engine_ready_changed.connect(self._on_engine_ready_changed)
         self._on_state_changed("idle")
 
     def _icon_for_state(self, state: str) -> QIcon:
         color = QColor("#6b7280")
-        if state == "recording":
+        if not self._engine_ready:
+            color = QColor("#2563eb")
+        elif state == "recording":
             color = QColor("#e11d48")
         elif state == "transcribing":
             color = QColor("#f59e0b")
@@ -92,13 +97,28 @@ class STTCTray(QSystemTrayIcon):
         self._autostart_action.setChecked(is_autostart_enabled())
         self._toggle_window_action.setText("Hide Mini Window" if self._mini_window.isVisible() else "Show Mini Window")
 
+    def _on_engine_ready_changed(self, ready: bool) -> None:
+        self._engine_ready = ready
+        if not ready:
+            self._record_action.setEnabled(False)
+            self._record_action.setText("Preparing Engine")
+        elif self._status_action.text() != "Status: Recording":
+            self._record_action.setEnabled(True)
+            self._record_action.setText("Start Recording")
+        self.setIcon(self._icon_for_state("idle"))
+
     def _on_state_changed(self, state: str) -> None:
-        label = state.capitalize()
+        label = "Preparing" if not self._engine_ready and state == "idle" else state.capitalize()
         self._status_action.setText(f"Status: {label}")
         if state == "recording":
             self._record_action.setText("Stop Recording")
-        else:
+            self._record_action.setEnabled(True)
+        elif self._engine_ready:
             self._record_action.setText("Start Recording")
+            self._record_action.setEnabled(True)
+        else:
+            self._record_action.setText("Preparing Engine")
+            self._record_action.setEnabled(False)
         self.setIcon(self._icon_for_state(state))
         self.setToolTip(f"STTC ({label})")
 

@@ -8,13 +8,14 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 from typing import TYPE_CHECKING, Literal
 
 from pynput import keyboard
 
 from sttc.clipboard import copy_to_clipboard
 from sttc.recorder import AppState, HotkeyListener, QueueItem, recording_loop
-from sttc.transcriber import TranscriberFn, build_transcriber
+from sttc.transcriber import TranscriberFn, build_transcriber, should_announce_model_download
 
 if TYPE_CHECKING:
     from sttc.settings import Settings
@@ -31,7 +32,9 @@ StateChangedFn = Callable[[RuntimeState], None]
 TranscriptionFn = Callable[[str], None]
 ErrorFn = Callable[[str], None]
 StopRequestedFn = Callable[[], None]
-EngineStatusFn = Callable[[], None]
+EngineLifecycleFn = Callable[[], None]
+EngineReadyChangedFn = Callable[[bool], None]
+EngineStatusChangedFn = Callable[[str], None]
 
 
 def _run_notification_command(command: list[str]) -> bool:
@@ -73,8 +76,10 @@ class RuntimeController:
         on_transcription: TranscriptionFn | None = None,
         on_error: ErrorFn | None = None,
         on_stop_requested: StopRequestedFn | None = None,
-        on_engine_started: EngineStatusFn | None = None,
-        on_engine_stopped: EngineStatusFn | None = None,
+        on_engine_started: EngineLifecycleFn | None = None,
+        on_engine_stopped: EngineLifecycleFn | None = None,
+        on_engine_ready_changed: EngineReadyChangedFn | None = None,
+        on_engine_status_changed: EngineStatusChangedFn | None = None,
     ) -> None:
         self.settings = settings
         self.on_state_changed = on_state_changed
@@ -83,6 +88,8 @@ class RuntimeController:
         self.on_stop_requested = on_stop_requested
         self.on_engine_started = on_engine_started
         self.on_engine_stopped = on_engine_stopped
+        self.on_engine_ready_changed = on_engine_ready_changed
+        self.on_engine_status_changed = on_engine_status_changed
 
         self.state = AppState()
         self.audio_queue: queue.Queue[QueueItem] = queue.Queue()
@@ -92,6 +99,8 @@ class RuntimeController:
         self._last_state: RuntimeState | None = None
         self._transcribing = False
         self._started = False
+        self._transcriber_ready = threading.Event()
+        self._startup_error: str | None = None
 
         self._transcribe: TranscriberFn | None = None
         self._recorder_thread: threading.Thread | None = None
@@ -109,6 +118,12 @@ class RuntimeController:
             callback(*args)
         except Exception:
             logger.exception("Runtime callback failed")
+
+    def _emit_engine_ready(self, ready: bool) -> None:
+        self._safe_callback(self.on_engine_ready_changed, ready)
+
+    def _emit_engine_status(self, message: str) -> None:
+        self._safe_callback(self.on_engine_status_changed, message)
 
     def _current_state(self) -> RuntimeState:
         # Keep the UI in "recording" while chunk transcription runs in parallel.
@@ -146,9 +161,49 @@ class RuntimeController:
     def _on_quit_requested(self) -> None:
         self._safe_callback(self.on_stop_requested)
 
+    def _startup_status_message(self) -> str:
+        if self.settings.stt_model:
+            if not self.settings.openai_api_key:
+                return "OpenAI mode requires an API key. Open Settings to continue."
+            return "Starting OpenAI transcription engine..."
+        if should_announce_model_download(self.settings):
+            return "Downloading Whisper model... This can take a moment on first start."
+        return "Starting Whisper engine..."
+
+    def _waiting_status_message(self) -> str:
+        if self.settings.stt_model:
+            return "OpenAI transcription engine is still starting. Please wait."
+        if should_announce_model_download(self.settings):
+            return "Whisper model is still downloading. Please wait."
+        return "Whisper engine is still starting. Please wait."
+
+    def _can_start_recording(self) -> bool:
+        if self._startup_error is not None:
+            self._emit_engine_status(self._startup_error)
+            return False
+        if not self._transcriber_ready.is_set():
+            self._emit_engine_status(self._waiting_status_message())
+            return False
+        return True
+
     def _transcription_loop(self) -> None:
-        if self._transcribe is None:
+        if self.settings.stt_model and not self.settings.openai_api_key:
+            self._startup_error = "OpenAI mode requires an API key. Open Settings to continue."
+            self._emit_engine_status(self._startup_error)
             return
+
+        try:
+            self._transcribe = build_transcriber(self.settings, status_callback=self._emit_engine_status)
+        except Exception as exc:  # pragma: no cover - backend/network dependent
+            logger.exception("Failed to initialize transcription engine")
+            self._startup_error = f"Transcription engine failed to start: {exc}"
+            self._emit_engine_status(self._startup_error)
+            self._emit_error(self._startup_error)
+            return
+
+        self._transcriber_ready.set()
+        self._emit_engine_ready(True)
+        self._emit_engine_status("Ready. Press Start or use your hotkey.")
 
         while True:
             if self.stop_event.is_set() and self.audio_queue.empty():
@@ -200,7 +255,11 @@ class RuntimeController:
             return
 
         self.stop_event.clear()
-        self._transcribe = build_transcriber(self.settings)
+        self._transcribe = None
+        self._transcriber_ready.clear()
+        self._startup_error = None
+        self._emit_engine_ready(False)
+        self._emit_engine_status(self._startup_status_message())
 
         self._recorder_thread = threading.Thread(
             target=recording_loop,
@@ -222,6 +281,7 @@ class RuntimeController:
             recording_mode=self.settings.recording_mode,
             hotkey=self.settings.recording_hotkey,
             quit_hotkey=self.settings.quit_hotkey,
+            can_start_recording=self._can_start_recording,
             on_session_started=self._on_session_started,
             on_session_stopped=self._on_session_stopped,
             on_quit=self._on_quit_requested,
@@ -231,14 +291,35 @@ class RuntimeController:
             on_release=listener.on_release,
             suppress=False,
         )
+        self._keyboard_listener.daemon = True
 
         self._recorder_thread.start()
         self._transcriber_thread.start()
         self._keyboard_listener.start()
+        self._ensure_listener_started()
 
         self._started = True
         self._set_transcribing(False)
         self._safe_callback(self.on_engine_started)
+
+    def _ensure_listener_started(self) -> None:
+        if self._keyboard_listener is None:
+            return
+
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            if not self._keyboard_listener.is_alive():
+                self._keyboard_listener.join(timeout=0)
+                msg = "Global hotkey listener stopped during startup."
+                raise RuntimeError(msg)
+            if self._keyboard_listener.running:
+                return
+            time.sleep(0.01)
+
+        if not self._keyboard_listener.is_alive():
+            self._keyboard_listener.join(timeout=0)
+        msg = "Global hotkey listener did not become ready."
+        raise RuntimeError(msg)
 
     def wait_for_stop_signal(self) -> None:
         if self._keyboard_listener is None:
@@ -247,6 +328,8 @@ class RuntimeController:
 
     def start_recording(self) -> None:
         if not self._started or self.state.is_recording():
+            return
+        if not self._can_start_recording():
             return
         session_id = self.state.start_session()
         self._on_session_started(session_id)
@@ -273,6 +356,7 @@ class RuntimeController:
 
         if self._keyboard_listener is not None:
             self._keyboard_listener.stop()
+            self._keyboard_listener.join(timeout=1.0)
 
         self.audio_queue.join()
 
@@ -286,6 +370,10 @@ class RuntimeController:
         self._keyboard_listener = None
         self._transcribe = None
         self._started = False
+        self._transcriber_ready.clear()
+        self._startup_error = None
+        self._emit_engine_ready(False)
+        self._emit_engine_status("Stopped")
         self._set_transcribing(False)
 
         self._safe_callback(self.on_engine_stopped)

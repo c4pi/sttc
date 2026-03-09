@@ -1,10 +1,13 @@
-﻿"""Qt application entrypoint for STTC GUI mode."""
+"""Qt application entrypoint for STTC GUI mode."""
 
 from __future__ import annotations
 
+import logging
+import os
 import sys
 from typing import TYPE_CHECKING, cast
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
 from sttc.gui.bridge import STTCBridge
@@ -14,6 +17,8 @@ from sttc.gui.tray import STTCTray
 
 if TYPE_CHECKING:
     from sttc.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 
 def run_gui(settings: Settings, minimized: bool = False) -> None:
@@ -49,26 +54,51 @@ def run_gui(settings: Settings, minimized: bool = False) -> None:
     mini_window = MiniWindow(bridge, open_settings)
 
     tray: STTCTray | None = None
-    if QSystemTrayIcon.isSystemTrayAvailable():
+    tray_available = QSystemTrayIcon.isSystemTrayAvailable()
+    logger.info("System tray available: %s", tray_available)
+    if tray_available:
         tray = STTCTray(bridge, mini_window, open_settings)
         tray.show()
 
-    bridge.quit_requested.connect(app.quit)
+    def _quit() -> None:
+        if tray is not None:
+            tray.hide()
+        mini_window.close()
+        if settings_window is not None:
+            settings_window.close()
+        app.quit()
 
-    def _show_error(message: str) -> None:
-        QMessageBox.warning(mini_window, "STTC Error", message)
+    bridge.quit_requested.connect(_quit)
 
-    bridge.error_occurred.connect(_show_error)
+    def _notify_error(message: str) -> None:
+        if tray is not None:
+            tray.showMessage("STTC", message, QSystemTrayIcon.MessageIcon.Warning, 4000)
 
-    try:
-        bridge.start()
-    except Exception as exc:
-        QMessageBox.critical(mini_window, "STTC Startup Failed", str(exc))
-        raise
-
+    bridge.error_occurred.connect(_notify_error)
     app.aboutToQuit.connect(bridge.stop)
+
+    def _start_bridge() -> None:
+        try:
+            bridge.start()
+        except Exception as exc:
+            logger.exception("STTC GUI startup failed")
+            QMessageBox.critical(mini_window, "STTC Startup Failed", str(exc))
+            app.quit()
 
     if not minimized or tray is None:
         mini_window.show()
 
-    app.exec()
+    QTimer.singleShot(0, _start_bridge)
+
+    try:
+        app.exec()
+    finally:
+        try:
+            bridge.stop()
+        except Exception:
+            logger.exception("STTC GUI shutdown failed")
+        if tray is not None:
+            tray.hide()
+
+    if getattr(sys, "frozen", False):
+        os._exit(0)
