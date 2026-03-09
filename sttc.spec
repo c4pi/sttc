@@ -11,7 +11,6 @@ PROJECT_ROOT = Path(globals().get("SPECPATH", ".")).resolve()
 ENTRYPOINT = PROJECT_ROOT / "src" / "sttc" / "__main__.py"
 ICON_PATH = PROJECT_ROOT / "scripts" / "appimage" / ("sttc.ico" if sys.platform == "win32" else "sttc.png")
 GUI_RESOURCES_DIR = PROJECT_ROOT / "src" / "sttc" / "gui" / "resources"
-RUNTIME_HOOK = PROJECT_ROOT / "scripts" / "pyinstaller_runtime_hook.py"
 
 binaries = []
 for package_name in ("sounddevice", "faster_whisper", "ctranslate2"):
@@ -51,8 +50,10 @@ hiddenimports += [
     "sttc.gui.bridge",
     "sttc.gui.env_editor",
     "sttc.gui.mini_window",
+    "sttc.gui.onboarding_dialog",
     "sttc.gui.settings_window",
     "sttc.gui.tray",
+    "sttc.onboarding",
     "sttc.recorder",
     "sttc.runtime",
     "sttc.transcriber",
@@ -96,7 +97,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[str(RUNTIME_HOOK)] if RUNTIME_HOOK.exists() else [],
+    runtime_hooks=[],
     excludes=[
         "IPython",
         "_pytest",

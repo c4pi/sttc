@@ -26,9 +26,9 @@ logger = logging.getLogger(__name__)
 TranscriberFn = Callable[[np.ndarray, int], str]
 EngineStatusChangedFn = Callable[[str], None]
 
+
 def _should_disable_hf_download_progress() -> bool:
     return sys.stdout is None or sys.stderr is None
-
 
 
 @contextmanager
@@ -155,29 +155,45 @@ def _build_cloud_transcriber(model_name: str) -> TranscriberFn:
     return transcribe
 
 
-def _resolve_download_root(model_cache_dir: Path | None) -> str | None:
-    if model_cache_dir is None:
-        return None
-    model_cache_dir.mkdir(parents=True, exist_ok=True)
-    return str(model_cache_dir)
+def _default_hf_cache_dir() -> Path:
+    configured = os.environ.get("HF_HUB_CACHE") or os.environ.get("HUGGINGFACE_HUB_CACHE")
+    if configured:
+        return Path(configured).expanduser()
+
+    try:
+        constants = importlib.import_module("huggingface_hub.constants")
+        cache_dir = getattr(constants, "HF_HUB_CACHE", None)
+        if cache_dir:
+            return Path(cache_dir)
+    except Exception:
+        pass
+
+    return Path.home() / ".cache" / "huggingface" / "hub"
 
 
-def _cache_repo_dir(model_name: str, model_cache_dir: Path | None) -> Path | None:
-    if model_cache_dir is None:
-        return None
+def _effective_model_cache_dir(model_cache_dir: Path | None) -> Path:
+    return model_cache_dir if model_cache_dir is not None else _default_hf_cache_dir()
+
+
+def _resolve_download_root(model_cache_dir: Path | None) -> str:
+    effective_cache_dir = _effective_model_cache_dir(model_cache_dir)
+    effective_cache_dir.mkdir(parents=True, exist_ok=True)
+    return str(effective_cache_dir)
+
+
+def _cache_repo_dir(model_name: str, model_cache_dir: Path | None) -> Path:
+    cache_root = _effective_model_cache_dir(model_cache_dir)
     if "/" in model_name:
         owner, repo = model_name.split("/", maxsplit=1)
         repo_folder = f"models--{owner}--{repo}"
     else:
         repo_folder = f"models--Systran--faster-whisper-{model_name}"
-    return model_cache_dir / repo_folder
+    return cache_root / repo_folder
 
 
-def _cache_lock_dir(model_name: str, model_cache_dir: Path | None) -> Path | None:
+def _cache_lock_dir(model_name: str, model_cache_dir: Path | None) -> Path:
     repo_dir = _cache_repo_dir(model_name, model_cache_dir)
-    if repo_dir is None or model_cache_dir is None:
-        return None
-    return model_cache_dir / ".locks" / repo_dir.name
+    return repo_dir.parent / ".locks" / repo_dir.name
 
 
 def _is_local_model_snapshot(path: Path) -> bool:
@@ -187,7 +203,7 @@ def _is_local_model_snapshot(path: Path) -> bool:
 
 def _resolve_cached_snapshot_dir(model_name: str, model_cache_dir: Path | None) -> Path | None:
     repo_dir = _cache_repo_dir(model_name, model_cache_dir)
-    if repo_dir is None or not repo_dir.exists():
+    if not repo_dir.exists():
         return None
 
     refs_main = repo_dir / "refs" / "main"
@@ -210,7 +226,7 @@ def _resolve_cached_snapshot_dir(model_name: str, model_cache_dir: Path | None) 
 
 def _clear_incomplete_model_cache(model_name: str, model_cache_dir: Path | None) -> None:
     repo_dir = _cache_repo_dir(model_name, model_cache_dir)
-    if repo_dir is None or not repo_dir.exists():
+    if not repo_dir.exists():
         return
     if _resolve_cached_snapshot_dir(model_name, model_cache_dir) is not None:
         return
@@ -219,17 +235,14 @@ def _clear_incomplete_model_cache(model_name: str, model_cache_dir: Path | None)
     shutil.rmtree(repo_dir)
 
     lock_dir = _cache_lock_dir(model_name, model_cache_dir)
-    if lock_dir is not None and lock_dir.exists():
+    if lock_dir.exists():
         logger.info("Removing stale faster-whisper cache lock directory: %s", lock_dir)
         shutil.rmtree(lock_dir)
 
 
 def _download_local_model(model_name: str, model_cache_dir: Path | None) -> Path:
     download_model = importlib.import_module("faster_whisper").download_model
-    kwargs: dict[str, Any] = {}
-    download_root = _resolve_download_root(model_cache_dir)
-    if download_root:
-        kwargs["cache_dir"] = download_root
+    kwargs: dict[str, Any] = {"cache_dir": _resolve_download_root(model_cache_dir)}
     if _should_disable_hf_download_progress():
         logger.info("Disabling Hugging Face progress bars because no console streams are available")
     with _temporarily_disable_hf_download_progress():
@@ -252,17 +265,17 @@ def _create_local_model(
     status_callback: EngineStatusChangedFn | None = None,
 ) -> WhisperModel:
     whisper_model_cls = importlib.import_module("faster_whisper").WhisperModel
+    effective_cache_dir = _effective_model_cache_dir(model_cache_dir)
     logger.info(
         "Whisper model cache root: %s",
-        model_cache_dir if model_cache_dir is not None else "huggingface_hub default cache",
+        effective_cache_dir if model_cache_dir is not None else f"huggingface_hub default cache ({effective_cache_dir})",
     )
     repo_dir = _cache_repo_dir(model_name, model_cache_dir)
-    if repo_dir is not None:
-        logger.info("Whisper model cache repo: %s", repo_dir)
+    logger.info("Whisper model cache repo: %s", repo_dir)
 
     model_path = _resolve_cached_snapshot_dir(model_name, model_cache_dir)
     if model_path is None:
-        if repo_dir is not None and repo_dir.exists():
+        if repo_dir.exists():
             _emit_engine_status(status_callback, "Repairing incomplete Whisper cache...")
             _clear_incomplete_model_cache(model_name, model_cache_dir)
         _emit_engine_status(status_callback, "Downloading Whisper model... This can take a moment on first start.")
@@ -284,10 +297,7 @@ def should_announce_model_download(settings: Settings) -> bool:
     """Return True when the configured local Whisper model is not cached yet."""
     if settings.stt_model:
         return False
-    model_cache_dir = settings.model_cache_dir
-    if model_cache_dir is None:
-        return False
-    return _resolve_cached_snapshot_dir(settings.stt_whisper_model, model_cache_dir) is None
+    return _resolve_cached_snapshot_dir(settings.stt_whisper_model, settings.model_cache_dir) is None
 
 
 def ensure_local_model_available(settings: Settings, *, announce: bool) -> None:

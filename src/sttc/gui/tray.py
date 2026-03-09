@@ -25,12 +25,14 @@ class STTCTray(QSystemTrayIcon):
         bridge: STTCBridge,
         mini_window: MiniWindow,
         open_settings: Callable[[], None],
+        open_onboarding: Callable[[], None],
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._bridge = bridge
         self._mini_window = mini_window
         self._engine_ready = False
+        self._current_state = "idle"
 
         self._status_action = QAction("Status: Preparing", self)
         self._status_action.setEnabled(False)
@@ -45,6 +47,9 @@ class STTCTray(QSystemTrayIcon):
         self._settings_action = QAction("Settings", self)
         self._settings_action.triggered.connect(open_settings)
 
+        self._onboarding_action = QAction("Run Onboarding", self)
+        self._onboarding_action.triggered.connect(open_onboarding)
+
         self._autostart_action = QAction("Auto-start", self)
         self._autostart_action.setCheckable(True)
         self._autostart_action.triggered.connect(self._toggle_autostart)
@@ -58,6 +63,7 @@ class STTCTray(QSystemTrayIcon):
         self._menu.addAction(self._toggle_window_action)
         self._menu.addAction(self._record_action)
         self._menu.addAction(self._settings_action)
+        self._menu.addAction(self._onboarding_action)
         self._menu.addSeparator()
         self._menu.addAction(self._autostart_action)
         self._menu.addSeparator()
@@ -99,15 +105,10 @@ class STTCTray(QSystemTrayIcon):
 
     def _on_engine_ready_changed(self, ready: bool) -> None:
         self._engine_ready = ready
-        if not ready:
-            self._record_action.setEnabled(False)
-            self._record_action.setText("Preparing Engine")
-        elif self._status_action.text() != "Status: Recording":
-            self._record_action.setEnabled(True)
-            self._record_action.setText("Start Recording")
-        self.setIcon(self._icon_for_state("idle"))
+        self._on_state_changed(self._current_state)
 
     def _on_state_changed(self, state: str) -> None:
+        self._current_state = state
         label = "Preparing" if not self._engine_ready and state == "idle" else state.capitalize()
         self._status_action.setText(f"Status: {label}")
         if state == "recording":

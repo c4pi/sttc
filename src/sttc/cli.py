@@ -1,12 +1,13 @@
 """CLI entrypoint for sttc."""
 
-from collections.abc import Callable
+from __future__ import annotations
+
 import importlib
 import logging
 import os
 import sys
 import traceback
-from typing import TypedDict, cast
+from typing import TYPE_CHECKING, TypedDict, cast
 
 import rich_click as click
 from rich_click import RichGroup
@@ -15,8 +16,22 @@ from tqdm import tqdm
 
 from sttc import __version__
 from sttc.autostart import disable_autostart, enable_autostart, is_autostart_enabled
-from sttc.first_run import run_first_launch_setup
+from sttc.onboarding import (
+    CURATED_WHISPER_MODELS,
+    DEFAULT_CLOUD_MODEL,
+    Backend,
+    OnboardingValues,
+    RecordingMode,
+    default_onboarding_values,
+    is_onboarding_complete,
+    onboarding_required_message,
+    persist_onboarding_values,
+)
 from sttc.settings import Settings, get_settings, get_user_config_dir, is_bundled_executable
+from sttc.transcriber import should_announce_model_download
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class CliContext(TypedDict):
@@ -60,7 +75,6 @@ def _is_bundled_runtime() -> bool:
     return getattr(sys, "_MEIPASS", None) is not None
 
 
-
 def _can_read_stdin() -> bool:
     stdin = sys.stdin
     if stdin is None or stdin.closed:
@@ -70,6 +84,21 @@ def _can_read_stdin() -> bool:
     except (OSError, ValueError, RuntimeError):
         return False
     return True
+
+
+def _has_interactive_terminal() -> bool:
+    stdin = sys.stdin
+    stdout = sys.stdout
+    return bool(
+        _can_read_stdin()
+        and stdin is not None
+        and stdout is not None
+        and hasattr(stdin, "isatty")
+        and hasattr(stdout, "isatty")
+        and stdin.isatty()
+        and stdout.isatty()
+    )
+
 
 def _prepare_bundled_default_command() -> None:
     # Double-clicking bundled sttc.exe provides no args; default to interactive run mode.
@@ -108,6 +137,163 @@ def _load_run_gui() -> Callable[[Settings, bool], None]:
     return run_gui
 
 
+def _load_run_onboarding_gui() -> Callable[[Settings], Settings | None]:
+    try:
+        run_onboarding_gui = importlib.import_module("sttc.gui.app").run_onboarding_gui
+    except ImportError as exc:
+        if str(exc).startswith("No module named 'PySide6") or "PySide6" in str(exc):
+            msg = "GUI onboarding requires PySide6. Install it with: uv sync --extra gui"
+            raise click.ClickException(msg) from exc
+        raise
+    return run_onboarding_gui
+
+
+def _set_or_clear_env(key: str, value: str | None) -> None:
+    if value is None or value == "":
+        os.environ.pop(key, None)
+        return
+    os.environ[key] = value
+
+
+def _sync_process_env(settings: Settings) -> None:
+    _set_or_clear_env("OPENAI_API_KEY", settings.openai_api_key)
+    _set_or_clear_env("STT_MODEL", settings.stt_model)
+    _set_or_clear_env("STT_WHISPER_MODEL", settings.stt_whisper_model)
+    _set_or_clear_env("STT_MODEL_CACHE_DIR", settings.stt_model_cache_dir)
+    _set_or_clear_env("RECORDING_MODE", settings.recording_mode)
+    _set_or_clear_env("RECORDING_HOTKEY", settings.recording_hotkey)
+    _set_or_clear_env("QUIT_HOTKEY", settings.quit_hotkey)
+    _set_or_clear_env("STT_CHUNK_SECONDS", str(settings.stt_chunk_seconds))
+    _set_or_clear_env("SAMPLE_RATE_TARGET", str(settings.sample_rate_target))
+    _set_or_clear_env("CHANNELS", str(settings.channels))
+    _set_or_clear_env("ENABLE_GUI", "true" if settings.enable_gui else "false")
+    _set_or_clear_env("GUI_START_MINIMIZED", "true" if settings.gui_start_minimized else "false")
+    _set_or_clear_env(
+        "ONBOARDING_VERSION",
+        None if settings.onboarding_version is None else str(settings.onboarding_version),
+    )
+
+
+def _prompt_hotkey_settings(defaults: OnboardingValues) -> tuple[str, str, str]:
+    keep_defaults = click.confirm("Keep the default recording mode and hotkeys?", default=True)
+    if keep_defaults:
+        return defaults.recording_mode, defaults.recording_hotkey, defaults.quit_hotkey
+
+    recording_mode = cast(
+        "str",
+        click.prompt(
+            "Recording mode",
+            type=click.Choice(["toggle", "hold"], case_sensitive=False),
+            default=defaults.recording_mode,
+            show_choices=True,
+        ),
+    )
+    recording_hotkey = cast("str", click.prompt("Recording hotkey", default=defaults.recording_hotkey))
+    quit_hotkey = cast("str", click.prompt("Quit hotkey", default=defaults.quit_hotkey))
+    return recording_mode, recording_hotkey, quit_hotkey
+
+
+def _prompt_backend_settings(defaults: OnboardingValues) -> tuple[str, str, str]:
+    backend = cast(
+        "str",
+        click.prompt(
+            "Transcription backend",
+            type=click.Choice(["local", "cloud"], case_sensitive=False),
+            default=defaults.backend,
+            show_choices=True,
+        ),
+    )
+    if backend == "cloud":
+        api_key = cast("str", click.prompt("OpenAI API key", default=defaults.openai_api_key, show_default=False))
+        if not api_key.strip():
+            msg = "Cloud transcription requires an API key."
+            raise click.ClickException(msg)
+        cloud_model = cast("str", click.prompt("Cloud model", default=defaults.cloud_model or DEFAULT_CLOUD_MODEL))
+        return backend, api_key, cloud_model
+
+    whisper_model = cast(
+        "str",
+        click.prompt(
+            "Whisper model",
+            type=click.Choice(CURATED_WHISPER_MODELS, case_sensitive=False),
+            default=defaults.whisper_model,
+            show_choices=True,
+        ),
+    )
+    return backend, "", whisper_model
+
+
+def _prompt_startup_settings(defaults: OnboardingValues) -> tuple[bool, bool, bool]:
+    autostart_enabled = click.confirm("Enable auto-start on login?", default=defaults.autostart_enabled)
+    enable_gui = click.confirm("Prefer GUI startup when available?", default=defaults.enable_gui)
+    gui_start_minimized = False
+    if enable_gui:
+        gui_start_minimized = click.confirm("Start the GUI minimized?", default=defaults.gui_start_minimized)
+    return autostart_enabled, enable_gui, gui_start_minimized
+
+
+def _render_onboarding_summary(values: OnboardingValues) -> None:
+    click.echo()
+    click.echo("Review setup:")
+    click.echo(f"  Backend: {'Cloud / OpenAI' if values.backend == 'cloud' else 'Local Whisper'}")
+    if values.backend == "cloud":
+        click.echo(f"  Cloud model: {values.cloud_model}")
+        click.echo("  API key: configured")
+    else:
+        click.echo(f"  Whisper model: {values.whisper_model}")
+        click.echo("  Model download: starts after setup finishes if needed")
+    click.echo(f"  Recording mode: {values.recording_mode}")
+    click.echo(f"  Recording hotkey: {values.recording_hotkey}")
+    click.echo(f"  Quit hotkey: {values.quit_hotkey}")
+    click.echo(f"  Auto-start: {'enabled' if values.autostart_enabled else 'disabled'}")
+    click.echo(f"  GUI startup: {'enabled' if values.enable_gui else 'disabled'}")
+    if values.enable_gui:
+        click.echo(f"  Start minimized: {'yes' if values.gui_start_minimized else 'no'}")
+    click.echo()
+
+
+def run_cli_onboarding(settings: Settings) -> Settings:
+    defaults = default_onboarding_values(settings)
+
+    click.echo("STTC setup")
+    click.echo("Choose how STTC should start before it downloads a local model or listens for hotkeys.")
+    click.echo()
+
+    recording_mode, recording_hotkey, quit_hotkey = _prompt_hotkey_settings(defaults)
+    backend, api_key, backend_model = _prompt_backend_settings(defaults)
+    autostart_enabled, enable_gui, gui_start_minimized = _prompt_startup_settings(defaults)
+
+    values = OnboardingValues(
+        backend=cast("Backend", backend),
+        cloud_model=backend_model if backend == "cloud" else DEFAULT_CLOUD_MODEL,
+        openai_api_key=api_key if backend == "cloud" else "",
+        whisper_model=backend_model if backend == "local" else defaults.whisper_model,
+        recording_mode=cast("RecordingMode", recording_mode),
+        recording_hotkey=recording_hotkey,
+        quit_hotkey=quit_hotkey,
+        autostart_enabled=autostart_enabled,
+        enable_gui=enable_gui,
+        gui_start_minimized=gui_start_minimized,
+    )
+
+    try:
+        values.to_settings(settings)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    _render_onboarding_summary(values)
+    if not click.confirm("Save these settings?", default=True):
+        msg = "Setup cancelled. Onboarding is still incomplete."
+        raise click.ClickException(msg)
+
+    new_settings, env_path = persist_onboarding_values(settings, values)
+    _sync_process_env(new_settings)
+    click.echo(f"Settings saved to {env_path}")
+    if values.backend == "local" and should_announce_model_download(new_settings):
+        click.echo("Local Whisper model download will begin on the next startup.")
+    return new_settings
+
+
 click_config.HEADER_TEXT = "[bold cyan]sttc[/] - [dim]sttc - speech to text clipboard[/]"
 click_config.OPTIONS_PANEL_TITLE = "Options"
 click_config.COMMANDS_PANEL_TITLE = "Commands"
@@ -125,8 +311,7 @@ class OrderPreservingGroup(RichGroup):
 def cli_group(ctx: click.Context, verbose: bool) -> None:
     _configure_logging(verbose=verbose)
     settings = get_settings()
-    if settings.openai_api_key:
-        os.environ["OPENAI_API_KEY"] = settings.openai_api_key
+    _sync_process_env(settings)
     ctx.obj = {"settings": settings}
 
 
@@ -138,7 +323,6 @@ def cli_group(ctx: click.Context, verbose: bool) -> None:
 def cmd_run(ctx: click.Context, gui: bool, cli_mode: bool, minimized: bool) -> None:
     context = cast("CliContext", ctx.obj)
     settings = context["settings"]
-    run_first_launch_setup(settings)
 
     if gui and cli_mode:
         msg = "--gui and --cli cannot be combined."
@@ -149,6 +333,11 @@ def cmd_run(ctx: click.Context, gui: bool, cli_mode: bool, minimized: bool) -> N
         msg = "--minimized cannot be used with --cli."
         raise click.ClickException(msg)
 
+    if not use_gui and not is_onboarding_complete(settings):
+        if not _has_interactive_terminal():
+            raise click.ClickException(onboarding_required_message())
+        settings = run_cli_onboarding(settings)
+
     start_minimized = minimized
     if use_gui and not gui:
         start_minimized = settings.gui_start_minimized or minimized
@@ -158,6 +347,27 @@ def cmd_run(ctx: click.Context, gui: bool, cli_mode: bool, minimized: bool) -> N
         return
 
     _load_run_app()(settings)
+
+
+@cli_group.command("setup", help="Run the onboarding flow again.")
+@click.option("--cli", "cli_mode", is_flag=True, help="Run setup in the terminal instead of the GUI.")
+@click.pass_context
+def cmd_setup(ctx: click.Context, cli_mode: bool) -> None:
+    context = cast("CliContext", ctx.obj)
+    settings = context["settings"]
+
+    if cli_mode:
+        if not _has_interactive_terminal():
+            raise click.ClickException(onboarding_required_message())
+        run_cli_onboarding(settings)
+        return
+
+    new_settings = _load_run_onboarding_gui()(settings)
+    if new_settings is None:
+        if not is_onboarding_complete(settings):
+            raise click.ClickException("Setup cancelled. Onboarding is still incomplete.")
+        return
+    _sync_process_env(new_settings)
 
 
 @cli_group.command("version", help="Print the application version.")
@@ -173,6 +383,7 @@ def cmd_settings(ctx: click.Context) -> None:
     click.echo(f"app_env={settings.app_env}")
     click.echo(f"debug={settings.debug}")
     click.echo(f"log_level={settings.log_level}")
+    click.echo(f"onboarding_version={settings.onboarding_version}")
     click.echo(f"stt_model={settings.stt_model}")
     click.echo(f"stt_chunk_seconds={settings.stt_chunk_seconds}")
     click.echo(f"stt_whisper_model={settings.stt_whisper_model}")

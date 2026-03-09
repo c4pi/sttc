@@ -24,12 +24,11 @@ from PySide6.QtWidgets import (
 
 from sttc.autostart import is_autostart_enabled, sync_autostart
 from sttc.gui.env_editor import upsert_env_values
+from sttc.onboarding import CURATED_WHISPER_MODELS, DEFAULT_CLOUD_MODEL, normalize_hotkey
 from sttc.settings import WHISPER_SAMPLE_RATE, Settings
 
 if TYPE_CHECKING:
     from sttc.gui.bridge import STTCBridge
-
-DEFAULT_CLOUD_MODEL = "openai/gpt-4o-mini-transcribe"
 
 
 class SettingsWindow(QDialog):
@@ -71,7 +70,13 @@ class SettingsWindow(QDialog):
         self.stt_model_input = QLineEdit(settings.stt_model or DEFAULT_CLOUD_MODEL)
         self.stt_model_input.setPlaceholderText(DEFAULT_CLOUD_MODEL)
 
-        self.stt_whisper_model_input = QLineEdit(settings.stt_whisper_model)
+        self.stt_whisper_model_input = QComboBox()
+        self.stt_whisper_model_input.addItems(CURATED_WHISPER_MODELS)
+        whisper_model = settings.stt_whisper_model or "base"
+        if whisper_model not in CURATED_WHISPER_MODELS:
+            self.stt_whisper_model_input.addItem(whisper_model)
+        self.stt_whisper_model_input.setCurrentText(whisper_model)
+
         self.openai_api_key_input = QLineEdit(settings.openai_api_key or "")
         self.openai_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.api_key_toggle_button = QToolButton()
@@ -176,10 +181,6 @@ class SettingsWindow(QDialog):
         layout.addWidget(cancel_button)
         return layout
 
-    @staticmethod
-    def _normalize_hotkey(value: str) -> str:
-        return value.strip().lower().replace(" ", "")
-
     def _on_backend_changed(self, _index: int) -> None:
         self._sync_transcription_mode_controls()
 
@@ -216,12 +217,12 @@ class SettingsWindow(QDialog):
         base_values.update(
             {
                 "stt_model": self._selected_stt_model(),
-                "stt_whisper_model": self.stt_whisper_model_input.text().strip() or "base",
+                "stt_whisper_model": self.stt_whisper_model_input.currentText().strip() or "base",
                 "openai_api_key": self.openai_api_key_input.text().strip() or None,
                 "stt_model_cache_dir": self.model_cache_input.text().strip() or None,
                 "recording_mode": cast('Literal["hold", "toggle"]', recording_mode),
-                "recording_hotkey": self._normalize_hotkey(self.recording_hotkey_input.text()),
-                "quit_hotkey": self._normalize_hotkey(self.quit_hotkey_input.text()),
+                "recording_hotkey": normalize_hotkey(self.recording_hotkey_input.text()),
+                "quit_hotkey": normalize_hotkey(self.quit_hotkey_input.text()),
                 "enable_gui": self.enable_gui_checkbox.isChecked(),
                 "gui_start_minimized": self.gui_start_minimized_checkbox.isChecked(),
                 "stt_chunk_seconds": self.chunk_seconds_input.value(),
@@ -239,12 +240,12 @@ class SettingsWindow(QDialog):
 
         return {
             "STT_MODEL": stt_model,
-            "STT_WHISPER_MODEL": self.stt_whisper_model_input.text().strip() or "base",
+            "STT_WHISPER_MODEL": self.stt_whisper_model_input.currentText().strip() or "base",
             "OPENAI_API_KEY": self.openai_api_key_input.text().strip(),
             "STT_MODEL_CACHE_DIR": self.model_cache_input.text().strip(),
             "RECORDING_MODE": self.recording_mode_combo.currentText(),
-            "RECORDING_HOTKEY": self._normalize_hotkey(self.recording_hotkey_input.text()),
-            "QUIT_HOTKEY": self._normalize_hotkey(self.quit_hotkey_input.text()),
+            "RECORDING_HOTKEY": normalize_hotkey(self.recording_hotkey_input.text()),
+            "QUIT_HOTKEY": normalize_hotkey(self.quit_hotkey_input.text()),
             "ENABLE_GUI": self.enable_gui_checkbox.isChecked(),
             "GUI_START_MINIMIZED": self.gui_start_minimized_checkbox.isChecked(),
             "STT_CHUNK_SECONDS": self.chunk_seconds_input.value(),

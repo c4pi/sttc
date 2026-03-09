@@ -54,29 +54,23 @@ Behavior:
 - `ENABLE_GUI=false`
 - `GUI_START_MINIMIZED=false`
 
-## Linux prerequisites (Ubuntu)
+## First Launch and Setup
 
-`uv sync` installs Python packages only. Audio/clipboard system libraries must be installed via `apt`.
+On the first launch, STTC now runs a real onboarding flow before it starts the transcription engine.
+
+- GUI launches show a short onboarding dialog before any Whisper download or hotkey listener starts.
+- `uv run sttc run --cli` runs a matching text setup flow when onboarding is incomplete and the terminal is interactive.
+- Non-interactive CLI runs fail with guidance instead of silently marking setup complete.
+- Onboarding is tracked with `ONBOARDING_VERSION` in the saved config, not a separate marker file.
+
+You can rerun onboarding any time:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y libportaudio2 xclip
+uv run sttc setup
+uv run sttc setup --cli
 ```
 
-Wayland users can install `wl-clipboard` (`wl-copy`) instead of `xclip`:
-
-```bash
-sudo apt-get install -y libportaudio2 wl-clipboard
-```
-
-## First Launch
-
-When you start the bundled executable for the first time, STTC asks:
-
-- Whether auto-start on login should be enabled (`y/n`, mandatory).
-- Whether you want to configure an API key now (`y/n`, mandatory).
-
-If no API key is configured, STTC downloads the local Whisper model after setup.
+If you choose local Whisper during onboarding, the model download begins only after you finish setup.
 
 ## Runtime configuration
 
@@ -85,10 +79,12 @@ If no API key is configured, STTC downloads the local Whisper model after setup.
 - Set `STT_MODEL` for cloud transcription via LiteLLM.
 - Set `OPENAI_API_KEY` (or provider-specific key) when using cloud models.
 - Leave `STT_MODEL` empty for local `faster-whisper`.
+- Set `STT_WHISPER_MODEL` to one of the curated onboarding defaults such as `tiny`, `base`, `small`, `medium`, or `large-v3`.
 - Set `STT_MODEL_CACHE_DIR` to override the local model cache location.
 - Set `RECORDING_MODE=toggle` (default) or `RECORDING_MODE=hold`.
 - Set `RECORDING_HOTKEY` (for example `ctrl+shift`, `ctrl+alt+r`, `f8`).
 - Set `QUIT_HOTKEY` for exiting the app (for example `ctrl+alt+q`, `ctrl+shift+escape`).
+- Set `ONBOARDING_VERSION=1` when setup has completed successfully.
 
 ## Auto-Start
 
@@ -102,7 +98,7 @@ Behavior:
 
 - Autostart triggers when your desktop login session starts.
 - Screen lock/unlock does not trigger autostart (`Win + L` on Windows is lock, not logout/login).
-- If autostart is enabled and GUI/minimized preferences change in Settings, STTC rewrites the autostart command to match current preferences.
+- If autostart is enabled and GUI/minimized preferences change in Settings or onboarding, STTC rewrites the autostart command to match current preferences.
 
 ## Advanced CLI Mode
 
@@ -110,6 +106,21 @@ Use CLI mode for diagnostics, scripting, or headless usage:
 
 ```bash
 uv run sttc run --cli
+```
+
+## Linux prerequisites (Ubuntu)
+
+`uv sync` installs Python packages only. Audio/clipboard system libraries must be installed via `apt`.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libportaudio2 xclip
+```
+
+Wayland users can install `wl-clipboard` (`wl-copy`) instead of `xclip`:
+
+```bash
+sudo apt-get install -y libportaudio2 wl-clipboard
 ```
 
 ## Build Native Executable

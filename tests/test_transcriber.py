@@ -77,6 +77,14 @@ def test_should_not_announce_model_download_when_snapshot_exists(tmp_path: Path)
     assert should_announce_model_download(settings) is False
 
 
+def test_should_not_announce_model_download_from_default_cache(monkeypatch, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    _write_snapshot(tmp_path)
+    monkeypatch.setattr("sttc.transcriber._default_hf_cache_dir", lambda: tmp_path)
+    settings = Settings(_env_file=None, stt_model=None, stt_model_cache_dir=None)
+
+    assert should_announce_model_download(settings) is False
+
+
 def test_should_announce_model_download_when_repo_is_incomplete(tmp_path: Path) -> None:
     _write_incomplete_repo(tmp_path)
     settings = Settings(_env_file=None, stt_model=None, stt_model_cache_dir=str(tmp_path))

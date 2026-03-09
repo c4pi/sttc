@@ -15,6 +15,7 @@ APP_NAME = "sttc"
 ENV_FILENAME = ".env"
 ENV_EXAMPLE_FILENAME = ".env.example"
 WHISPER_SAMPLE_RATE = 16000
+CURRENT_ONBOARDING_VERSION = 1
 
 
 def is_bundled_executable() -> bool:
@@ -87,6 +88,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     debug: bool = False
     log_level: str = "INFO"
+    onboarding_version: int | None = None
     openai_api_key: str | None = None
 
     stt_model: str | None = None
