@@ -32,7 +32,7 @@ def test_default_onboarding_values_follow_current_settings() -> None:
 
     assert values.backend == "cloud"
     assert values.cloud_model == "openai/gpt-4o-mini-transcribe"
-    assert values.openai_api_key == "sk-test" # pragma: allowlist secret
+    assert values.openai_api_key == "test-api-key"  # pragma: allowlist secret
     assert values.recording_mode == "hold"
     assert values.enable_gui is True
     assert values.gui_start_minimized is True
@@ -64,8 +64,8 @@ def test_onboarding_values_to_settings_marks_onboarding_complete() -> None:
 
 
 def test_persist_onboarding_values_updates_env_and_autostart(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    saved = {}
-    sync_calls = []
+    saved: dict[str, object] = {}
+    sync_calls: list[tuple[bool, bool, bool]] = []
     env_path = Path("C:/temp/.env")
 
     def fake_upsert(updates, *, env_path=None):
@@ -97,5 +97,5 @@ def test_persist_onboarding_values_updates_env_and_autostart(monkeypatch) -> Non
     assert settings.onboarding_version == CURRENT_ONBOARDING_VERSION
     assert saved["ONBOARDING_VERSION"] == CURRENT_ONBOARDING_VERSION
     assert saved["STT_MODEL"] == "openai/gpt-4o-mini-transcribe"
-    assert saved["OPENAI_API_KEY"] == "sk-live" # pragma: allowlist secret
+    assert saved["OPENAI_API_KEY"] == "live-api-key"  # pragma: allowlist secret
     assert sync_calls == [(True, True, True)]

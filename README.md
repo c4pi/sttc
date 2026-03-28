@@ -1,4 +1,4 @@
-# sttc
+﻿# sttc
 
 Hotkey-driven speech-to-text clipboard tool.
 
@@ -28,23 +28,23 @@ Install GUI dependencies for source runs:
 uv sync --extra gui
 ```
 
-## GUI-First Run Mode
+## Run Modes
 
 ```bash
-# Default on all desktop platforms: opens mini GUI + settings
+# Default terminal behavior: headless / CLI mode
 uv run sttc run
 
-# Launch GUI hidden/minimized (tray when available)
-uv run sttc run --minimized
+# Launch the GUI explicitly
+uv run sttc run --gui
 
-# Optional advanced/headless mode (no GUI)
-uv run sttc run --cli
+# Launch GUI hidden/minimized (tray when available)
+uv run sttc run --gui --minimized
 ```
 
 Behavior:
 
-- `sttc run` is GUI-first by default.
-- Mini window is the main control surface (state + mic + settings).
+- `sttc run` is CLI/headless by default.
+- `sttc run --gui` opens the mini GUI + settings window.
 - Settings opens a larger dialog for model/API/hotkeys/autostart/runtime options.
 - Tray icon is optional and used when supported by the desktop session.
 - Closing the mini window hides it; app keeps running until quit.
@@ -59,7 +59,7 @@ Behavior:
 On the first launch, STTC now runs a real onboarding flow before it starts the transcription engine.
 
 - GUI launches show a short onboarding dialog before any Whisper download or hotkey listener starts.
-- `uv run sttc run --cli` runs a matching text setup flow when onboarding is incomplete and the terminal is interactive.
+- `uv run sttc run` runs the matching text setup flow when onboarding is incomplete and the terminal is interactive.
 - Non-interactive CLI runs fail with guidance instead of silently marking setup complete.
 - Onboarding is tracked with `ONBOARDING_VERSION` in the saved config, not a separate marker file.
 
@@ -67,7 +67,7 @@ You can rerun onboarding any time:
 
 ```bash
 uv run sttc setup
-uv run sttc setup --cli
+uv run sttc setup --gui
 ```
 
 If you choose local Whisper during onboarding, the model download begins only after you finish setup.
@@ -100,12 +100,13 @@ Behavior:
 - Screen lock/unlock does not trigger autostart (`Win + L` on Windows is lock, not logout/login).
 - If autostart is enabled and GUI/minimized preferences change in Settings or onboarding, STTC rewrites the autostart command to match current preferences.
 
-## Advanced CLI Mode
+## Explicit GUI Mode
 
-Use CLI mode for diagnostics, scripting, or headless usage:
+Install GUI dependencies only if you want the desktop UI:
 
 ```bash
-uv run sttc run --cli
+uv sync --extra gui
+uv run sttc run --gui
 ```
 
 ## Linux prerequisites (Ubuntu)

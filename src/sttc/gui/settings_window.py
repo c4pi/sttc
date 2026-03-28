@@ -125,10 +125,10 @@ class SettingsWindow(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        self.enable_gui_checkbox = QCheckBox("Enable GUI by default")
+        self.enable_gui_checkbox = QCheckBox("Launch GUI on auto-start")
         self.enable_gui_checkbox.setChecked(settings.enable_gui)
 
-        self.gui_start_minimized_checkbox = QCheckBox("Start GUI minimized")
+        self.gui_start_minimized_checkbox = QCheckBox("Start auto-started GUI minimized")
         self.gui_start_minimized_checkbox.setChecked(settings.gui_start_minimized)
 
         self.autostart_checkbox = QCheckBox("Enable auto-start on login")

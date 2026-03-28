@@ -31,7 +31,7 @@ from sttc.onboarding import (
     default_onboarding_values,
     persist_onboarding_values,
 )
-from sttc.transcriber import should_announce_model_download
+from sttc.transcriber import should_announce_model_download, validate_openai_api_key
 
 if TYPE_CHECKING:
     from sttc.settings import Settings
@@ -181,8 +181,8 @@ class OnboardingDialog(QDialog):
         self._quit_hotkey_input = QLineEdit()
 
         self._autostart_checkbox = QCheckBox("Start STTC automatically when you log in")
-        self._enable_gui_checkbox = QCheckBox("Prefer GUI startup when available")
-        self._start_minimized_checkbox = QCheckBox("Start the GUI minimized")
+        self._enable_gui_checkbox = QCheckBox("Launch GUI when auto-start runs")
+        self._start_minimized_checkbox = QCheckBox("Start the auto-started GUI minimized")
 
         form.addRow("Recording mode", self._recording_mode_combo)
         form.addRow("Recording hotkey", self._recording_hotkey_input)
@@ -218,7 +218,7 @@ class OnboardingDialog(QDialog):
         self._recording_hotkey_input.setText(self._defaults.recording_hotkey)
         self._quit_hotkey_input.setText(self._defaults.quit_hotkey)
         self._autostart_checkbox.setChecked(self._defaults.autostart_enabled)
-        self._enable_gui_checkbox.setChecked(True)
+        self._enable_gui_checkbox.setChecked(self._defaults.enable_gui)
         self._start_minimized_checkbox.setChecked(self._defaults.gui_start_minimized)
         self._sync_backend_controls()
 
@@ -231,7 +231,7 @@ class OnboardingDialog(QDialog):
         self._recording_hotkey_input.setText("ctrl+shift")
         self._quit_hotkey_input.setText("ctrl+alt+q")
         self._autostart_checkbox.setChecked(False)
-        self._enable_gui_checkbox.setChecked(True)
+        self._enable_gui_checkbox.setChecked(self._defaults.enable_gui)
         self._start_minimized_checkbox.setChecked(False)
         self._stack.setCurrentIndex(3)
         self._refresh_step()
@@ -241,7 +241,7 @@ class OnboardingDialog(QDialog):
         step_titles = [
             ("Welcome", "A quick overview before STTC starts doing any work."),
             ("Transcription Backend", "Choose local Whisper or cloud transcription and fill in the matching model settings."),
-            ("Hotkeys and Startup", "Confirm the recording mode, hotkeys, and how STTC should start."),
+            ("Hotkeys and Startup", "Confirm the recording mode, hotkeys, and what auto-start should launch."),
             ("Review and Finish", "Save these choices. STTC will only start the engine after this step is complete."),
         ]
         title, subtitle = step_titles[index]
@@ -306,6 +306,12 @@ class OnboardingDialog(QDialog):
         if values.backend == "cloud" and not values.openai_api_key.strip():
             QMessageBox.warning(self, "Missing API Key", "Cloud transcription needs an OpenAI API key.")
             return None
+        if values.backend == "cloud":
+            try:
+                validate_openai_api_key(values.openai_api_key)
+            except RuntimeError as exc:
+                QMessageBox.warning(self, "Invalid API Key", str(exc))
+                return None
         try:
             return values.to_settings(self._base_settings)
         except Exception as exc:
@@ -334,7 +340,7 @@ class OnboardingDialog(QDialog):
                 f"Recording hotkey: {values.recording_hotkey}",
                 f"Quit hotkey: {values.quit_hotkey}",
                 f"Auto-start: {'enabled' if values.autostart_enabled else 'disabled'}",
-                f"GUI startup: {'enabled' if values.enable_gui else 'disabled'}",
+                f"Auto-start launch: {'GUI' if values.enable_gui else 'CLI / headless'}",
                 f"Start minimized: {'yes' if values.gui_start_minimized else 'no'}",
             ]
         )

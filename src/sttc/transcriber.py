@@ -12,6 +12,9 @@ from pathlib import Path
 import shutil
 import sys
 from typing import TYPE_CHECKING, Any
+import urllib.error
+import urllib.parse
+import urllib.request
 
 import numpy as np
 import soundfile as sf
@@ -124,6 +127,51 @@ def _configure_litellm_logging() -> None:
         ll_logger.setLevel(logging.WARNING)
         ll_logger.propagate = False
 
+
+def _openai_models_validation_request(api_key: str, *, timeout: float = 10.0):
+    models_url = "https://api.openai.com/v1/models"
+    parsed = urllib.parse.urlsplit(models_url)
+    if parsed.scheme != "https":
+        msg = "OpenAI API key validation requires HTTPS."
+        raise RuntimeError(msg)
+
+    request = urllib.request.Request(  # noqa: S310 - fixed HTTPS OpenAI endpoint validated above
+        models_url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "User-Agent": "sttc/0.1.0",
+        },
+        method="GET",
+    )
+    return urllib.request.urlopen(request, timeout=timeout)  # noqa: S310 - fixed HTTPS OpenAI endpoint validated above
+
+
+def validate_openai_api_key(api_key: str, *, timeout: float = 10.0) -> None:
+    normalized = api_key.strip()
+    if not normalized:
+        msg = "Cloud transcription requires an OpenAI API key."
+        raise RuntimeError(msg)
+
+    try:
+        with _openai_models_validation_request(normalized, timeout=timeout) as response:
+            if response.status == 200:
+                return
+            msg = f"OpenAI API key validation failed with status {response.status}."
+            raise RuntimeError(msg)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            msg = "The OpenAI API key was rejected (401 Unauthorized)."
+            raise RuntimeError(msg) from exc
+        details = exc.read().decode("utf-8", errors="replace").strip()
+        msg = f"OpenAI API key validation failed ({exc.code})."
+        if details:
+            msg = f"{msg} {details}"
+        raise RuntimeError(msg) from exc
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", exc)
+        msg = f"Could not reach OpenAI to validate the API key: {reason}"
+        raise RuntimeError(msg) from exc
 
 def _run_cloud_transcription(*, model_name: str, wav_buffer: io.BytesIO) -> Any:
     try:

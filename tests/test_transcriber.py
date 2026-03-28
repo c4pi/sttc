@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import io
 import os
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
+import urllib.error
+
+import pytest
 
 from sttc.settings import Settings
-from sttc.transcriber import _create_local_model, _download_local_model, should_announce_model_download
+from sttc.transcriber import (
+    _create_local_model,
+    _download_local_model,
+    should_announce_model_download,
+    validate_openai_api_key,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -61,6 +70,54 @@ def test_download_local_model_disables_progress_without_console(
     assert result == snapshot_dir
     assert seen_env == ["1"]
     assert os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS") is None
+
+
+
+def test_validate_openai_api_key_rejects_blank_key() -> None:
+    with pytest.raises(RuntimeError, match="requires an OpenAI API key"):
+        validate_openai_api_key("")
+
+def test_validate_openai_api_key_accepts_success(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    class _Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr("sttc.transcriber._openai_models_validation_request", lambda *_args, **_kwargs: _Response())
+
+    validate_openai_api_key("sk-live")
+
+
+def test_validate_openai_api_key_rejects_unauthorized(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    error = urllib.error.HTTPError(
+        url="https://api.openai.com/v1/models",
+        code=401,
+        msg="Unauthorized",
+        hdrs=None,
+        fp=io.BytesIO(b'{"error":"invalid_api_key"}'),
+    )
+    monkeypatch.setattr(
+        "sttc.transcriber._openai_models_validation_request",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(error),
+    )
+
+    with pytest.raises(RuntimeError, match="401 Unauthorized"):
+        validate_openai_api_key("bad-key")
+
+
+def test_validate_openai_api_key_reports_network_error(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    error = urllib.error.URLError("offline")
+    monkeypatch.setattr(
+        "sttc.transcriber._openai_models_validation_request",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(error),
+    )
+
+    with pytest.raises(RuntimeError, match="Could not reach OpenAI"):
+        validate_openai_api_key("sk-live")
 
 
 def test_should_announce_model_download_when_snapshot_is_missing(tmp_path: Path) -> None:

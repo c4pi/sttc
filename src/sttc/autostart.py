@@ -6,6 +6,7 @@ import importlib
 from pathlib import Path
 import platform
 import plistlib
+import subprocess
 import sys
 
 from sttc.settings import is_bundled_executable
@@ -20,26 +21,23 @@ def _winreg_module():
     return importlib.import_module("winreg")
 
 
-def _append_gui_flags(command: str, *, gui: bool, minimized: bool) -> str:
-    if not gui:
-        return command
+def _command_parts(*, gui: bool, minimized: bool) -> list[str]:
+    parts = [sys.executable, "run"] if is_bundled_executable() else [sys.executable, "-m", "sttc", "run"]
 
-    suffix = " --gui"
-    if minimized:
-        suffix += " --minimized"
-    return f"{command}{suffix}"
+    if gui:
+        parts.append("--gui")
+        if minimized:
+            parts.append("--minimized")
+    return parts
+
+
+def _join_command(parts: list[str]) -> str:
+    return subprocess.list2cmdline(parts)
 
 
 def get_executable_path(*, gui: bool = False, minimized: bool = False) -> str:
-    """Return the executable path or dev-mode command."""
-    if is_bundled_executable():
-        if gui:
-            executable = f'"{sys.executable}" run'
-            return _append_gui_flags(executable, gui=gui, minimized=minimized)
-        return sys.executable
-
-    base_command = "uv run sttc run"
-    return _append_gui_flags(base_command, gui=gui, minimized=minimized)
+    """Return the executable path or source-install command."""
+    return _join_command(_command_parts(gui=gui, minimized=minimized))
 
 
 def _enable_windows_autostart(command: str) -> None:
@@ -86,8 +84,6 @@ def _is_windows_autostart_enabled() -> bool:
 
 
 def _macos_program_arguments(command: str) -> list[str]:
-    if is_bundled_executable():
-        return ["/bin/sh", "-lc", command]
     return ["/bin/sh", "-lc", command]
 
 

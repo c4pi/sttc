@@ -1,4 +1,4 @@
-"""Shared onboarding state and persistence helpers."""
+﻿"""Shared onboarding state and persistence helpers."""
 
 from __future__ import annotations
 
@@ -95,7 +95,7 @@ def default_onboarding_values(
 
 
 def onboarding_required_message() -> str:
-    return "Onboarding is incomplete. Run `sttc setup --cli` or start the GUI once to finish setup."
+    return "Onboarding is incomplete. Run `sttc setup` in the terminal or `sttc run --gui` to finish setup."
 
 
 def persist_onboarding_values(base_settings: Settings, values: OnboardingValues) -> tuple[Settings, Path]:
