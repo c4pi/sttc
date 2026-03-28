@@ -11,6 +11,7 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+BUILD_DIR = ROOT / "build"
 DIST_DIR = ROOT / "dist"
 STAGING_DIR = DIST_DIR / "sttc"
 FINAL_EXE = DIST_DIR / "sttc.exe"
@@ -58,6 +59,7 @@ def _remove_path(path: Path) -> None:
 
 
 def _prepare_output_paths() -> None:
+    _remove_path(BUILD_DIR)
     _remove_path(STAGING_DIR)
     _remove_path(FINAL_EXE)
     _remove_path(FINAL_INTERNAL_DIR)
@@ -73,6 +75,10 @@ def _flatten_onedir_output() -> None:
     shutil.rmtree(STAGING_DIR, ignore_errors=True)
 
 
+def _cleanup_build_artifacts() -> None:
+    _remove_path(BUILD_DIR)
+
+
 def main() -> int:
     env = os.environ.copy()
     env.setdefault("UV_CACHE_DIR", str(ROOT / ".uv-cache"))
@@ -81,6 +87,7 @@ def main() -> int:
     _prepare_output_paths()
     _run(["uv", "run", "pyinstaller", "--clean", "sttc.spec"], env=env)
     _flatten_onedir_output()
+    _cleanup_build_artifacts()
 
     print(f"Build completed. Artifact is in: {FINAL_EXE}")
     return 0
