@@ -29,9 +29,8 @@ jobs:
       - name: Package Windows bundle
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path release/sttc-windows-x64 | Out-Null
-          Copy-Item dist/sttc.exe release/sttc-windows-x64/sttc.exe
-          Copy-Item dist/_internal release/sttc-windows-x64/_internal -Recurse
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Copy-Item dist/sttc release/sttc-windows-x64 -Recurse
           Compress-Archive -Path release/sttc-windows-x64 -DestinationPath release/sttc-windows-x64.zip -Force
 
       - name: Upload binary artifact
