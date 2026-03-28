@@ -1,9 +1,8 @@
-from click.testing import CliRunner
+﻿from click.testing import CliRunner
 import pytest
 
-import sttc.cli as cli_module
 from sttc.cli import cli_group
-from sttc.settings import Settings
+from sttc.settings import CURRENT_ONBOARDING_VERSION, Settings
 from sttc.transcriber import build_transcriber
 
 
@@ -19,11 +18,19 @@ def test_settings_extended_defaults() -> None:
     assert s.recording_mode == "toggle"
     assert s.recording_hotkey == "ctrl+shift"
     assert s.quit_hotkey == "ctrl+alt+q"
+    assert s.enable_gui is False
+    assert s.gui_start_minimized is False
+    assert s.onboarding_version is None
 
 
 def test_settings_recording_hotkey_normalizes() -> None:
     s = Settings(_env_file=None, recording_hotkey=" CTRL + Alt + R ")
     assert s.recording_hotkey == "ctrl+alt+r"
+
+
+def test_settings_sample_rate_is_fixed() -> None:
+    s = Settings(_env_file=None, sample_rate_target=44100)
+    assert s.sample_rate_target == 16000
 
 
 def test_settings_quit_hotkey_normalizes() -> None:
@@ -42,83 +49,244 @@ def test_settings_hotkeys_must_differ() -> None:
         Settings(_env_file=None, recording_hotkey="ctrl+shift", quit_hotkey="ctrl+shift")
 
 
-def test_cli_run_calls_setup_and_app(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    called = {"setup": False, "run": False}
+def test_cli_run_defaults_to_headless(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = {"gui": False, "headless": False}
 
-    def fake_setup(settings: Settings) -> None:
-        called["setup"] = True
+    def fake_run_gui(_settings: Settings, _minimized: bool) -> None:
+        called["gui"] = True
+
+    def fake_headless(settings: Settings) -> None:
+        called["headless"] = True
         assert isinstance(settings, Settings)
 
-    def fake_run(settings: Settings) -> None:
-        called["run"] = True
-        assert isinstance(settings, Settings)
-
-    monkeypatch.setattr("sttc.cli.run_first_launch_setup", fake_setup)
-    monkeypatch.setattr("sttc.cli._load_run_app", lambda: fake_run)
+    monkeypatch.setattr(
+        "sttc.cli.get_settings",
+        lambda: Settings(_env_file=None, gui_start_minimized=False, onboarding_version=CURRENT_ONBOARDING_VERSION),
+    )
+    monkeypatch.setattr("sttc.cli._load_run_gui", lambda: fake_run_gui)
+    monkeypatch.setattr("sttc.cli._load_run_app", lambda: fake_headless)
 
     runner = CliRunner()
     result = runner.invoke(cli_group, ["run"])
     assert result.exit_code == 0
-    assert called["setup"] is True
-    assert called["run"] is True
+    assert called["gui"] is False
+    assert called["headless"] is True
 
 
-def test_cli_autostart_enable(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    called = {"value": False}
+def test_cli_run_gui_flag_starts_gui(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = {"gui": False, "headless": False}
 
-    def fake_enable() -> None:
-        called["value"] = True
+    def fake_run_gui(settings: Settings, minimized: bool) -> None:
+        called["gui"] = True
+        assert isinstance(settings, Settings)
+        assert minimized is False
 
-    monkeypatch.setattr("sttc.cli.enable_autostart", fake_enable)
+    def fake_headless(_settings: Settings) -> None:
+        called["headless"] = True
+
+    monkeypatch.setattr(
+        "sttc.cli.get_settings",
+        lambda: Settings(_env_file=None, gui_start_minimized=False, onboarding_version=CURRENT_ONBOARDING_VERSION),
+    )
+    monkeypatch.setattr("sttc.cli._load_run_gui", lambda: fake_run_gui)
+    monkeypatch.setattr("sttc.cli._load_run_app", lambda: fake_headless)
 
     runner = CliRunner()
-    result = runner.invoke(cli_group, ["autostart", "enable"])
+    result = runner.invoke(cli_group, ["run", "--gui"])
     assert result.exit_code == 0
-    assert called["value"] is True
+    assert called["gui"] is True
+    assert called["headless"] is False
 
 
-def test_cli_autostart_status(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setattr("sttc.cli.is_autostart_enabled", lambda: True)
+def test_cli_run_uses_gui_start_minimized_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = {"gui": False}
+
+    monkeypatch.setattr(
+        "sttc.cli.get_settings",
+        lambda: Settings(_env_file=None, gui_start_minimized=True, onboarding_version=CURRENT_ONBOARDING_VERSION),
+    )
+
+    def fake_run_gui(_settings: Settings, minimized: bool) -> None:
+        called["gui"] = True
+        assert minimized is True
+
+    monkeypatch.setattr("sttc.cli._load_run_gui", lambda: fake_run_gui)
 
     runner = CliRunner()
-    result = runner.invoke(cli_group, ["autostart", "status"])
+    result = runner.invoke(cli_group, ["run", "--gui"])
     assert result.exit_code == 0
-    assert "enabled" in result.output
+    assert called["gui"] is True
 
 
-def test_main_bundled_defaults_to_run(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    captured = {"argv": []}
+def test_cli_run_runs_onboarding_when_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"setup": False, "headless": False}
+    configured = Settings(_env_file=None, onboarding_version=CURRENT_ONBOARDING_VERSION)
 
-    def fake_cli_group(*, obj: dict[str, object]) -> None:
-        assert obj == {}
-        captured["argv"] = list(cli_module.sys.argv)
+    monkeypatch.setattr("sttc.cli.get_settings", lambda: Settings(_env_file=None, onboarding_version=None))
+    monkeypatch.setattr("sttc.cli._has_interactive_terminal", lambda: True)
 
-    monkeypatch.setattr(cli_module, "_is_bundled_runtime", lambda: True)
-    monkeypatch.setattr(cli_module, "cli_group", fake_cli_group)
-    monkeypatch.setattr(cli_module.sys, "argv", ["sttc.exe"])
+    def fake_setup(_settings: Settings) -> Settings:
+        calls["setup"] = True
+        return configured
 
-    cli_module.main()
+    def fake_headless(settings: Settings) -> None:
+        calls["headless"] = True
+        assert settings is configured
 
-    assert captured["argv"] == ["sttc.exe", "run"]
+    monkeypatch.setattr("sttc.cli.run_cli_onboarding", fake_setup)
+    monkeypatch.setattr("sttc.cli._load_run_app", lambda: fake_headless)
 
-
-def test_main_non_bundled_keeps_no_args(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    captured = {"argv": []}
-
-    def fake_cli_group(*, obj: dict[str, object]) -> None:
-        assert obj == {}
-        captured["argv"] = list(cli_module.sys.argv)
-
-    monkeypatch.setattr(cli_module, "_is_bundled_runtime", lambda: False)
-    monkeypatch.setattr(cli_module, "cli_group", fake_cli_group)
-    monkeypatch.setattr(cli_module.sys, "argv", ["sttc"])
-
-    cli_module.main()
-
-    assert captured["argv"] == ["sttc"]
+    runner = CliRunner()
+    result = runner.invoke(cli_group, ["run"])
+    assert result.exit_code == 0
+    assert calls == {"setup": True, "headless": True}
 
 
-def test_transcriber_selection_cloud(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_cli_run_fails_noninteractive_when_onboarding_incomplete(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("sttc.cli.get_settings", lambda: Settings(_env_file=None, onboarding_version=None))
+    monkeypatch.setattr("sttc.cli._has_interactive_terminal", lambda: False)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_group, ["run"])
+    assert result.exit_code != 0
+    assert "Run `sttc setup`" in result.output
+
+
+def test_cli_run_minimized_requires_gui() -> None:
+    runner = CliRunner()
+    result = runner.invoke(cli_group, ["run", "--minimized"])
+    assert result.exit_code != 0
+    assert "only be used with --gui" in result.output
+
+
+def test_cli_setup_runs_terminal_onboarding_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"setup": False}
+    monkeypatch.setattr("sttc.cli.get_settings", lambda: Settings(_env_file=None))
+    monkeypatch.setattr("sttc.cli._has_interactive_terminal", lambda: True)
+
+    def fake_setup(_settings: Settings) -> Settings:
+        calls["setup"] = True
+        return Settings(_env_file=None, onboarding_version=CURRENT_ONBOARDING_VERSION)
+
+    monkeypatch.setattr("sttc.cli.run_cli_onboarding", fake_setup)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_group, ["setup"])
+    assert result.exit_code == 0
+    assert calls["setup"] is True
+
+
+def test_cli_setup_gui_flag_opens_gui_onboarding(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = {"gui": False}
+    updated = Settings(_env_file=None, onboarding_version=CURRENT_ONBOARDING_VERSION)
+    monkeypatch.setattr("sttc.cli.get_settings", lambda: Settings(_env_file=None))
+
+    def fake_gui_setup(_settings: Settings) -> Settings:
+        called["gui"] = True
+        return updated
+
+    monkeypatch.setattr("sttc.cli._load_run_onboarding_gui", lambda: fake_gui_setup)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_group, ["setup", "--gui"])
+    assert result.exit_code == 0
+    assert called["gui"] is True
+
+
+def test_cli_onboarding_hides_api_key_and_saves_valid_cloud_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    validated: list[str] = []
+
+    monkeypatch.setattr("sttc.cli.get_settings", lambda: Settings(_env_file=None))
+    monkeypatch.setattr("sttc.cli._has_interactive_terminal", lambda: True)
+    monkeypatch.setattr("sttc.cli.should_announce_model_download", lambda _settings: False)
+
+    def fake_validate(api_key: str) -> None:
+        validated.append(api_key)
+
+    def fake_persist(_settings: Settings, values) -> tuple[Settings, str]:
+        saved = Settings(
+            _env_file=None,
+            onboarding_version=CURRENT_ONBOARDING_VERSION,
+            stt_model=values.cloud_model,
+            openai_api_key=values.openai_api_key,
+            enable_gui=values.enable_gui,
+            gui_start_minimized=values.gui_start_minimized,
+        )
+        return saved, "C:/temp/.env"
+
+    monkeypatch.setattr("sttc.cli.validate_openai_api_key", fake_validate)
+    monkeypatch.setattr("sttc.cli.persist_onboarding_values", fake_persist)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_group,
+        ["setup"],
+        input="y\ncloud\nsk-live\n\nn\nn\ny\n",
+    )
+
+    assert result.exit_code == 0
+    assert validated == ["sk-live"]
+    assert "sk-live" not in result.output
+    assert "Settings saved to C:/temp/.env" in result.output
+
+
+def test_cli_onboarding_retries_when_api_key_validation_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    validated: list[str] = []
+
+    monkeypatch.setattr("sttc.cli.get_settings", lambda: Settings(_env_file=None))
+    monkeypatch.setattr("sttc.cli._has_interactive_terminal", lambda: True)
+    monkeypatch.setattr("sttc.cli.should_announce_model_download", lambda _settings: False)
+
+    def fake_validate(api_key: str) -> None:
+        validated.append(api_key)
+        if api_key == "bad-key":  # pragma: allowlist secret
+            msg = "The OpenAI API key was rejected (401 Unauthorized)."
+            raise RuntimeError(msg)
+
+    def fake_persist(_settings: Settings, values) -> tuple[Settings, str]:
+        saved = Settings(
+            _env_file=None,
+            onboarding_version=CURRENT_ONBOARDING_VERSION,
+            stt_model=values.cloud_model,
+            openai_api_key=values.openai_api_key,
+            enable_gui=values.enable_gui,
+            gui_start_minimized=values.gui_start_minimized,
+        )
+        return saved, "C:/temp/.env"
+
+    monkeypatch.setattr("sttc.cli.validate_openai_api_key", fake_validate)
+    monkeypatch.setattr("sttc.cli.persist_onboarding_values", fake_persist)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_group,
+        ["setup"],
+        input="y\ncloud\nbad-key\ncloud\ngood-key\n\nn\nn\ny\n",
+    )
+
+    assert result.exit_code == 0
+    assert validated == ["bad-key", "good-key"]
+    assert "OpenAI API key validation failed" in result.output
+    assert "bad-key" not in result.output
+    assert "good-key" not in result.output
+
+
+
+def test_load_run_gui_reports_non_missing_pyside6_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_import(_name: str):
+        raise ImportError("DLL load failed while importing PySide6.QtWidgets")
+
+    monkeypatch.setattr("sttc.cli.importlib.import_module", fake_import)
+
+    runner = CliRunner()
+    result = runner.invoke(cli_group, ["run", "--gui"])
+
+    assert result.exit_code != 0
+    assert "failed to import even though PySide6 seems present" in result.output
+
+
+
+def test_transcriber_selection_cloud(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings(stt_model="whisper-1")
     sentinel = object()
 
@@ -128,7 +296,7 @@ def test_transcriber_selection_cloud(monkeypatch) -> None:  # type: ignore[no-un
     assert build_transcriber(settings) is sentinel
 
 
-def test_transcriber_selection_local(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_transcriber_selection_local(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings(stt_model=None, stt_whisper_model="small")
     sentinel = object()
 
