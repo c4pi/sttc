@@ -26,11 +26,19 @@ jobs:
       - name: Build executable
         run: uv run pyinstaller --clean sttc.spec
 
+      - name: Package Windows bundle
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release/sttc-windows-x64 | Out-Null
+          Copy-Item dist/sttc.exe release/sttc-windows-x64/sttc.exe
+          Copy-Item dist/_internal release/sttc-windows-x64/_internal -Recurse
+          Compress-Archive -Path release/sttc-windows-x64 -DestinationPath release/sttc-windows-x64.zip -Force
+
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-binary
-          path: dist/sttc.exe
+          path: release/sttc-windows-x64.zip
 
   # macOS release job kept commented out so it can be restored later if needed.
   #
@@ -118,7 +126,7 @@ jobs:
       - name: Prepare release files
         run: |
           set -euo pipefail
-          cp release-artifacts/windows-binary/sttc.exe sttc-windows-x64.exe
+          cp release-artifacts/windows-binary/sttc-windows-x64.zip sttc-windows-x64.zip
           # cp release-artifacts/linux-binary/sttc sttc-linux-x64
           # chmod +x sttc-linux-x64
           # tar -czf sttc-linux-x64.tar.gz sttc-linux-x64
@@ -128,4 +136,4 @@ jobs:
         with:
           # macOS and Linux release assets are intentionally disabled for now.
           files: |
-            sttc-windows-x64.exe
+            sttc-windows-x64.zip
