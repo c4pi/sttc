@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     sample_rate_target: int = Field(default=WHISPER_SAMPLE_RATE, ge=8000)
     channels: int = Field(default=1, ge=1)
     recording_mode: Literal["hold", "toggle"] = "toggle"
-    recording_hotkey: str = "ctrl+shift"
+    recording_hotkey: str = "ctrl+alt+a"
     quit_hotkey: str = "ctrl+alt+q"
     enable_gui: bool = False
     gui_start_minimized: bool = False
@@ -129,7 +129,7 @@ class Settings(BaseSettings):
         if not isinstance(value, str):
             return value
         normalized = value.strip().lower().replace(" ", "")
-        return normalized or "ctrl+shift"
+        return normalized or "ctrl+alt+a"
 
     @field_validator("quit_hotkey", mode="before")
     @classmethod

@@ -16,7 +16,7 @@ def test_settings_extended_defaults() -> None:
     assert s.sample_rate_target == 16000
     assert s.channels == 1
     assert s.recording_mode == "toggle"
-    assert s.recording_hotkey == "ctrl+shift"
+    assert s.recording_hotkey == "ctrl+alt+a"
     assert s.quit_hotkey == "ctrl+alt+q"
     assert s.enable_gui is False
     assert s.gui_start_minimized is False

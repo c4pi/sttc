@@ -22,8 +22,8 @@ def test_default_onboarding_values_follow_current_settings() -> None:
         stt_model="openai/gpt-4o-mini-transcribe",
         openai_api_key="test-api-key",  # pragma: allowlist secret
         recording_mode="hold",
-        recording_hotkey="ctrl+alt+r",
-        quit_hotkey="ctrl+shift+q",
+        recording_hotkey="ctrl+alt+a",
+        quit_hotkey="ctrl+alt+q",
         enable_gui=True,
         gui_start_minimized=True,
     )
@@ -46,8 +46,8 @@ def test_onboarding_values_to_settings_marks_onboarding_complete() -> None:
         openai_api_key="",
         whisper_model="small",
         recording_mode="toggle",
-        recording_hotkey=" CTRL + ALT + R ",
-        quit_hotkey=" CTRL + SHIFT + Q ",
+        recording_hotkey=" CTRL + ALT + A ",
+        quit_hotkey=" CTRL + ALT + Q ",
         autostart_enabled=False,
         enable_gui=True,
         gui_start_minimized=False,
@@ -58,8 +58,8 @@ def test_onboarding_values_to_settings_marks_onboarding_complete() -> None:
     assert settings.onboarding_version == CURRENT_ONBOARDING_VERSION
     assert settings.stt_model is None
     assert settings.stt_whisper_model == "small"
-    assert settings.recording_hotkey == "ctrl+alt+r"
-    assert settings.quit_hotkey == "ctrl+shift+q"
+    assert settings.recording_hotkey == "ctrl+alt+a"
+    assert settings.quit_hotkey == "ctrl+alt+q"
     assert settings.enable_gui is True
 
 
@@ -84,8 +84,8 @@ def test_persist_onboarding_values_updates_env_and_autostart(monkeypatch) -> Non
         openai_api_key="live-api-key",  # pragma: allowlist secret
         whisper_model="base",
         recording_mode="hold",
-        recording_hotkey="ctrl+alt+r",
-        quit_hotkey="ctrl+shift+q",
+        recording_hotkey="ctrl+alt+a",
+        quit_hotkey="ctrl+alt+q",
         autostart_enabled=True,
         enable_gui=True,
         gui_start_minimized=True,
