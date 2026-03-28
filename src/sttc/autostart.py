@@ -6,7 +6,7 @@ import importlib
 from pathlib import Path
 import platform
 import plistlib
-from shlex import quote
+import subprocess
 import sys
 
 from sttc.settings import is_bundled_executable
@@ -21,11 +21,23 @@ def _winreg_module():
     return importlib.import_module("winreg")
 
 
-def get_executable_path() -> str:
-    """Return the executable path or dev-mode command."""
-    if is_bundled_executable():
-        return sys.executable
-    return "uv run sttc run"
+def _command_parts(*, gui: bool, minimized: bool) -> list[str]:
+    parts = [sys.executable, "run"] if is_bundled_executable() else [sys.executable, "-m", "sttc", "run"]
+
+    if gui:
+        parts.append("--gui")
+        if minimized:
+            parts.append("--minimized")
+    return parts
+
+
+def _join_command(parts: list[str]) -> str:
+    return subprocess.list2cmdline(parts)
+
+
+def get_executable_path(*, gui: bool = False, minimized: bool = False) -> str:
+    """Return the executable path or source-install command."""
+    return _join_command(_command_parts(gui=gui, minimized=minimized))
 
 
 def _enable_windows_autostart(command: str) -> None:
@@ -72,8 +84,6 @@ def _is_windows_autostart_enabled() -> bool:
 
 
 def _macos_program_arguments(command: str) -> list[str]:
-    if is_bundled_executable():
-        return [command]
     return ["/bin/sh", "-lc", command]
 
 
@@ -98,8 +108,6 @@ def _is_macos_autostart_enabled() -> bool:
 
 
 def _linux_exec_line(command: str) -> str:
-    if is_bundled_executable():
-        return quote(command)
     return command
 
 
@@ -129,9 +137,9 @@ def _is_linux_autostart_enabled() -> bool:
     return LINUX_AUTOSTART_PATH.exists()
 
 
-def enable_autostart() -> None:
+def enable_autostart(*, gui: bool = False, minimized: bool = False) -> None:
     """Enable auto-start on the current platform."""
-    command = get_executable_path()
+    command = get_executable_path(gui=gui, minimized=minimized)
     os_name = platform.system()
     if os_name == "Windows":
         _enable_windows_autostart(command)
@@ -140,6 +148,14 @@ def enable_autostart() -> None:
         _enable_macos_autostart(command)
         return
     _enable_linux_autostart(command)
+
+
+def sync_autostart(enabled: bool, *, gui: bool = False, minimized: bool = False) -> None:
+    """Create/update or remove auto-start based on desired enabled state."""
+    if enabled:
+        enable_autostart(gui=gui, minimized=minimized)
+        return
+    disable_autostart()
 
 
 def disable_autostart() -> None:
