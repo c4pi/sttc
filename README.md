@@ -9,9 +9,9 @@ Hotkey-driven speech-to-text clipboard tool.
 
 ## Quick Install (Recommended)
 
+- STTC is currently supported and released for Windows only.
 - **Windows:** Download `sttc-windows-x64.exe` from the latest GitHub Release and double-click to run.
-- **macOS:** Download `sttc-macos-x64.app.zip` from the latest GitHub Release, unzip it, and move it to Applications.
-- **Linux:** Download `sttc-linux-x64.AppImage` from the latest GitHub Release, make it executable (`chmod +x sttc-linux-x64.AppImage`), and run it.
+- macOS and Linux support remains in the codebase for now, but is not currently documented or released as an officially supported target.
 
 ## Development Setup
 
@@ -46,7 +46,7 @@ Behavior:
 - `sttc run` is CLI/headless by default.
 - `sttc run --gui` opens the mini GUI + settings window.
 - Settings opens a larger dialog for model/API/hotkeys/autostart/runtime options.
-- Tray icon is optional and used when supported by the desktop session.
+- Tray icon is optional and used on supported Windows setups.
 - Closing the mini window hides it; app keeps running until quit.
 
 `.env` GUI keys:
@@ -100,30 +100,6 @@ Behavior:
 - Screen lock/unlock does not trigger autostart (`Win + L` on Windows is lock, not logout/login).
 - If autostart is enabled and GUI/minimized preferences change in Settings or onboarding, STTC rewrites the autostart command to match current preferences.
 
-## Explicit GUI Mode
-
-Install GUI dependencies only if you want the desktop UI:
-
-```bash
-uv sync --extra gui
-uv run sttc run --gui
-```
-
-## Linux prerequisites (Ubuntu)
-
-`uv sync` installs Python packages only. Audio/clipboard system libraries must be installed via `apt`.
-
-```bash
-sudo apt-get update
-sudo apt-get install -y libportaudio2 xclip
-```
-
-Wayland users can install `wl-clipboard` (`wl-copy`) instead of `xclip`:
-
-```bash
-sudo apt-get install -y libportaudio2 wl-clipboard
-```
-
 ## Build Native Executable
 
 ```bash
@@ -132,7 +108,7 @@ uv run python scripts/build.py
 
 Build artifact:
 
-- `dist/sttc` (`dist/sttc.exe` on Windows): GUI-first binary (no terminal window on Windows).
+- `dist/sttc.exe`: Windows executable (no terminal window).
 
 ## Development checks
 
