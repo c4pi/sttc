@@ -12,16 +12,19 @@ def test_toggle_mode_starts_and_stops_with_repeated_hotkey() -> None:
     listener = HotkeyListener(state, stop_event, recording_mode="toggle")
 
     listener.on_press(keyboard.Key.ctrl_l)
-    listener.on_press(keyboard.Key.shift_l)
+    listener.on_press(keyboard.Key.alt_l)
+    listener.on_press(keyboard.KeyCode.from_char("a"))
     assert state.recording is True
     first_session = state.session_id
 
-    listener.on_release(keyboard.Key.shift_l)
+    listener.on_release(keyboard.KeyCode.from_char("a"))
+    listener.on_release(keyboard.Key.alt_l)
     listener.on_release(keyboard.Key.ctrl_l)
     assert state.recording is True
 
     listener.on_press(keyboard.Key.ctrl_l)
-    listener.on_press(keyboard.Key.shift_l)
+    listener.on_press(keyboard.Key.alt_l)
+    listener.on_press(keyboard.KeyCode.from_char("a"))
     assert state.recording is False
     assert state.session_id == first_session
 
@@ -32,10 +35,11 @@ def test_hold_mode_stops_on_key_release() -> None:
     listener = HotkeyListener(state, stop_event, recording_mode="hold")
 
     listener.on_press(keyboard.Key.ctrl_l)
-    listener.on_press(keyboard.Key.shift_l)
+    listener.on_press(keyboard.Key.alt_l)
+    listener.on_press(keyboard.KeyCode.from_char("a"))
     assert state.recording is True
 
-    listener.on_release(keyboard.Key.shift_l)
+    listener.on_release(keyboard.KeyCode.from_char("a"))
     assert state.recording is False
 
 
@@ -80,23 +84,23 @@ def test_esc_no_longer_stops_app() -> None:
     assert state.recording is True
 
 
-def test_custom_hotkey_ctrl_alt_r_toggle_mode() -> None:
+def test_custom_hotkey_ctrl_alt_a_toggle_mode() -> None:
     state = AppState()
     stop_event = threading.Event()
-    listener = HotkeyListener(state, stop_event, recording_mode="toggle", hotkey="ctrl+alt+r")
+    listener = HotkeyListener(state, stop_event, recording_mode="toggle", hotkey="ctrl+alt+a")
 
     listener.on_press(keyboard.Key.ctrl_l)
     listener.on_press(keyboard.Key.alt_l)
-    listener.on_press(keyboard.KeyCode.from_char("r"))
+    listener.on_press(keyboard.KeyCode.from_char("a"))
     assert state.recording is True
 
-    listener.on_release(keyboard.KeyCode.from_char("r"))
+    listener.on_release(keyboard.KeyCode.from_char("a"))
     listener.on_release(keyboard.Key.alt_l)
     listener.on_release(keyboard.Key.ctrl_l)
 
     listener.on_press(keyboard.Key.ctrl_l)
     listener.on_press(keyboard.Key.alt_l)
-    listener.on_press(keyboard.KeyCode.from_char("r"))
+    listener.on_press(keyboard.KeyCode.from_char("a"))
     assert state.recording is False
 
 
@@ -112,7 +116,8 @@ def test_hotkey_respects_engine_readiness_gate() -> None:
     listener = HotkeyListener(state, stop_event, recording_mode="toggle", can_start_recording=_can_start)
 
     listener.on_press(keyboard.Key.ctrl_l)
-    listener.on_press(keyboard.Key.shift_l)
+    listener.on_press(keyboard.Key.alt_l)
+    listener.on_press(keyboard.KeyCode.from_char("a"))
 
     assert calls["count"] == 1
     assert state.recording is False

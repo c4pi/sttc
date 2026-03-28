@@ -228,7 +228,7 @@ class OnboardingDialog(QDialog):
         self._cloud_model_input.setText(DEFAULT_CLOUD_MODEL)
         self._api_key_input.clear()
         self._recording_mode_combo.setCurrentText("toggle")
-        self._recording_hotkey_input.setText("ctrl+shift")
+        self._recording_hotkey_input.setText("ctrl+alt+a")
         self._quit_hotkey_input.setText("ctrl+alt+q")
         self._autostart_checkbox.setChecked(False)
         self._enable_gui_checkbox.setChecked(self._defaults.enable_gui)

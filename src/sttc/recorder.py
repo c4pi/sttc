@@ -207,7 +207,7 @@ class HotkeyListener:
         stop_event: threading.Event,
         *,
         recording_mode: Literal["hold", "toggle"] = "toggle",
-        hotkey: str = "ctrl+shift",
+        hotkey: str = "ctrl+alt+a",
         quit_hotkey: str = "ctrl+alt+q",
         can_start_recording: Callable[[], bool] | None = None,
         on_session_started: Callable[[int], None] | None = None,
