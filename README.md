@@ -76,6 +76,9 @@ If you choose local Whisper during onboarding, the model download begins only af
 
 `sttc` loads settings from `.env` using `src/sttc/settings.py`.
 
+- Source checkouts and editable installs backed by this repository use `./.env` relative to the project root, not the current shell working directory.
+- Installed packages and the bundled Windows executable use a per-user config file instead. On Windows that path is typically `%APPDATA%\\sttc\\.env`.
+
 - Set `STT_MODEL` for cloud transcription via LiteLLM.
 - Set `OPENAI_API_KEY` (or provider-specific key) when using cloud models.
 - Leave `STT_MODEL` empty for local `faster-whisper`.
