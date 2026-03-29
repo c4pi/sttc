@@ -103,6 +103,18 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        _settings_cls: type[BaseSettings],
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ) -> tuple:
+        """Prefer the explicitly resolved env file over inherited shell variables."""
+        return init_settings, dotenv_settings, env_settings, file_secret_settings
+
     app_env: str = "development"
     debug: bool = False
     log_level: str = "INFO"

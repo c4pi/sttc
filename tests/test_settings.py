@@ -36,6 +36,8 @@ def test_get_settings_uses_source_env_even_when_cwd_changes(monkeypatch, tmp_pat
     monkeypatch.chdir(other_dir)
     monkeypatch.setattr("sttc.settings.get_source_checkout_root", lambda: source_root)
     monkeypatch.setattr("sttc.settings.get_user_config_dir", lambda: tmp_path / "config")
+    monkeypatch.setenv("ENABLE_GUI", "false")
+    monkeypatch.setenv("GUI_START_MINIMIZED", "false")
 
     settings = get_settings()
 
