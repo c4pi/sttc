@@ -35,6 +35,21 @@ def get_user_config_dir() -> Path:
     return Path.home() / ".config" / APP_NAME
 
 
+def get_source_checkout_root() -> Path | None:
+    """Return the repository root when running from a source checkout."""
+    package_dir = Path(__file__).resolve().parent
+    src_dir = package_dir.parent
+    if src_dir.name != "src":
+        return None
+
+    project_root = src_dir.parent
+    if not (project_root / "pyproject.toml").exists():
+        return None
+    if (project_root / "src" / "sttc").resolve() != package_dir:
+        return None
+    return project_root
+
+
 def get_resource_path(filename: str) -> Path:
     """Return the path to a bundled or local resource file."""
     bundle_root = vars(sys).get("_MEIPASS")
@@ -50,15 +65,19 @@ def get_default_model_cache_dir() -> Path | None:
     return None
 
 
+def get_user_env_file_path() -> Path:
+    """Return the per-user env path, creating the config directory if needed."""
+    config_dir = get_user_config_dir()
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir / ENV_FILENAME
+
+
 def ensure_bundled_env_file() -> tuple[Path, bool]:
     """Create user .env from bundled .env.example if missing.
 
     Returns the env path and whether the file was newly created.
     """
-    config_dir = get_user_config_dir()
-    config_dir.mkdir(parents=True, exist_ok=True)
-
-    env_path = config_dir / ENV_FILENAME
+    env_path = get_user_env_file_path()
     if env_path.exists():
         return env_path, False
 
@@ -70,13 +89,12 @@ def ensure_bundled_env_file() -> tuple[Path, bool]:
     return env_path, True
 
 
-def resolve_env_file_path() -> Path | str:
+def resolve_env_file_path() -> Path:
     """Resolve which env file should be used for this runtime mode."""
-    if is_bundled_executable():
-        config_dir = get_user_config_dir()
-        config_dir.mkdir(parents=True, exist_ok=True)
-        return config_dir / ENV_FILENAME
-    return ENV_FILENAME
+    source_root = get_source_checkout_root()
+    if source_root is not None:
+        return source_root / ENV_FILENAME
+    return get_user_env_file_path()
 
 
 class Settings(BaseSettings):
