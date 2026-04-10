@@ -40,7 +40,7 @@ class SettingsWindow(QDialog):
         self._autostart_enabled = is_autostart_enabled()
 
         self.setWindowTitle("STTC Settings")
-        self.resize(680, 500)
+        self.resize(680, 540)
 
         settings = bridge.get_settings()
 
@@ -56,6 +56,7 @@ class SettingsWindow(QDialog):
         root_layout.addLayout(self._build_buttons())
         self.setLayout(root_layout)
         self._sync_transcription_mode_controls()
+        self._update_refinement_warning()
 
     def _build_transcription_tab(self, settings: Settings) -> QWidget:
         tab = QWidget()
@@ -70,6 +71,9 @@ class SettingsWindow(QDialog):
         self.stt_model_input = QLineEdit(settings.stt_model or DEFAULT_CLOUD_MODEL)
         self.stt_model_input.setPlaceholderText(DEFAULT_CLOUD_MODEL)
 
+        self.refine_model_input = QLineEdit(settings.refine_model)
+        self.refine_model_input.setPlaceholderText("gpt-4.1-mini")
+
         self.stt_whisper_model_input = QComboBox()
         self.stt_whisper_model_input.addItems(CURATED_WHISPER_MODELS)
         whisper_model = settings.stt_whisper_model or "base"
@@ -79,6 +83,7 @@ class SettingsWindow(QDialog):
 
         self.openai_api_key_input = QLineEdit(settings.openai_api_key or "")
         self.openai_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.openai_api_key_input.textChanged.connect(self._update_refinement_warning)
         self.api_key_toggle_button = QToolButton()
         self.api_key_toggle_button.setCheckable(True)
         self.api_key_toggle_button.setText("Show")
@@ -95,6 +100,7 @@ class SettingsWindow(QDialog):
 
         form.addRow("Backend", self.backend_combo)
         form.addRow("Cloud Model (STT_MODEL)", self.stt_model_input)
+        form.addRow("Refine Model (REFINE_MODEL)", self.refine_model_input)
         form.addRow("Whisper Model", self.stt_whisper_model_input)
         form.addRow("API Key", api_key_widget)
         form.addRow("Model Cache Dir", self.model_cache_input)
@@ -102,6 +108,11 @@ class SettingsWindow(QDialog):
         self.transcription_hint = QLabel("")
         self.transcription_hint.setWordWrap(True)
         form.addRow("", self.transcription_hint)
+
+        self.refinement_warning = QLabel("")
+        self.refinement_warning.setWordWrap(True)
+        self.refinement_warning.setStyleSheet("color: #b00020;")
+        form.addRow("", self.refinement_warning)
         self._sync_transcription_mode_controls()
         return tab
 
@@ -114,10 +125,18 @@ class SettingsWindow(QDialog):
         self.recording_mode_combo.setCurrentText(settings.recording_mode)
 
         self.recording_hotkey_input = QLineEdit(settings.recording_hotkey)
+        self.refine_hotkey_input = QLineEdit(settings.refine_hotkey)
+        self.record_and_refine_hotkey_input = QLineEdit(settings.record_and_refine_hotkey)
+        self.summary_hotkey_input = QLineEdit(settings.summary_hotkey)
+        self.translation_hotkey_input = QLineEdit(settings.translation_hotkey)
         self.quit_hotkey_input = QLineEdit(settings.quit_hotkey)
 
         form.addRow("Recording Mode", self.recording_mode_combo)
         form.addRow("Recording Hotkey", self.recording_hotkey_input)
+        form.addRow("Refine Hotkey", self.refine_hotkey_input)
+        form.addRow("Record & Refine Hotkey", self.record_and_refine_hotkey_input)
+        form.addRow("Summary Hotkey", self.summary_hotkey_input)
+        form.addRow("Translation Hotkey", self.translation_hotkey_input)
         form.addRow("Quit Hotkey", self.quit_hotkey_input)
         return tab
 
@@ -197,19 +216,45 @@ class SettingsWindow(QDialog):
             return None
         return self.stt_model_input.text().strip() or DEFAULT_CLOUD_MODEL
 
+    def _current_preview_settings(self) -> Settings:
+        base_values = self._bridge.get_settings().model_dump()
+        base_values.update(
+            {
+                "openai_api_key": self.openai_api_key_input.text().strip() or None,
+                "refine_hotkey": normalize_hotkey(self.refine_hotkey_input.text()),
+                "record_and_refine_hotkey": normalize_hotkey(self.record_and_refine_hotkey_input.text()),
+                "summary_hotkey": normalize_hotkey(self.summary_hotkey_input.text()),
+                "translation_hotkey": normalize_hotkey(self.translation_hotkey_input.text()),
+            }
+        )
+        return Settings(**base_values)
+
+    def _update_refinement_warning(self) -> None:
+        try:
+            preview_settings = self._current_preview_settings()
+        except Exception:
+            self.refinement_warning.setText("")
+            return
+
+        if preview_settings.refinement_hotkeys_enabled:
+            self.refinement_warning.setText("")
+            return
+
+        line1, line2 = preview_settings.refinement_warning_lines
+        self.refinement_warning.setText(f"{line1}\n{line2}")
+
     def _sync_transcription_mode_controls(self) -> None:
         uses_cloud = self._uses_cloud_backend()
         self.stt_model_input.setEnabled(uses_cloud)
-        self.openai_api_key_input.setEnabled(uses_cloud)
-        self.api_key_toggle_button.setEnabled(uses_cloud)
         self.stt_whisper_model_input.setEnabled(not uses_cloud)
-        if not uses_cloud and self.api_key_toggle_button.isChecked():
-            self.api_key_toggle_button.setChecked(False)
-
         if uses_cloud:
-            self.transcription_hint.setText("Cloud mode uses STT_MODEL + API Key. Whisper Model is ignored.")
+            self.transcription_hint.setText(
+                "Cloud mode uses STT_MODEL for transcription. Refine, summary, and translation use OPENAI_API_KEY + REFINE_MODEL."
+            )
         else:
-            self.transcription_hint.setText("Local mode uses Whisper Model. Cloud model/API key are ignored.")
+            self.transcription_hint.setText(
+                "Local mode uses Whisper Model for transcription. Refine, summary, and translation still use OPENAI_API_KEY + REFINE_MODEL."
+            )
 
     def _build_runtime_settings(self) -> Settings:
         recording_mode = self.recording_mode_combo.currentText()
@@ -217,11 +262,16 @@ class SettingsWindow(QDialog):
         base_values.update(
             {
                 "stt_model": self._selected_stt_model(),
+                "refine_model": self.refine_model_input.text().strip() or "gpt-4.1-mini",
                 "stt_whisper_model": self.stt_whisper_model_input.currentText().strip() or "base",
                 "openai_api_key": self.openai_api_key_input.text().strip() or None,
                 "stt_model_cache_dir": self.model_cache_input.text().strip() or None,
                 "recording_mode": cast('Literal["hold", "toggle"]', recording_mode),
                 "recording_hotkey": normalize_hotkey(self.recording_hotkey_input.text()),
+                "refine_hotkey": normalize_hotkey(self.refine_hotkey_input.text()),
+                "record_and_refine_hotkey": normalize_hotkey(self.record_and_refine_hotkey_input.text()),
+                "summary_hotkey": normalize_hotkey(self.summary_hotkey_input.text()),
+                "translation_hotkey": normalize_hotkey(self.translation_hotkey_input.text()),
                 "quit_hotkey": normalize_hotkey(self.quit_hotkey_input.text()),
                 "enable_gui": self.enable_gui_checkbox.isChecked(),
                 "gui_start_minimized": self.gui_start_minimized_checkbox.isChecked(),
@@ -240,11 +290,16 @@ class SettingsWindow(QDialog):
 
         return {
             "STT_MODEL": stt_model,
+            "REFINE_MODEL": self.refine_model_input.text().strip() or "gpt-4.1-mini",
             "STT_WHISPER_MODEL": self.stt_whisper_model_input.currentText().strip() or "base",
             "OPENAI_API_KEY": self.openai_api_key_input.text().strip(),
             "STT_MODEL_CACHE_DIR": self.model_cache_input.text().strip(),
             "RECORDING_MODE": self.recording_mode_combo.currentText(),
             "RECORDING_HOTKEY": normalize_hotkey(self.recording_hotkey_input.text()),
+            "REFINE_HOTKEY": normalize_hotkey(self.refine_hotkey_input.text()),
+            "RECORD_AND_REFINE_HOTKEY": normalize_hotkey(self.record_and_refine_hotkey_input.text()),
+            "SUMMARY_HOTKEY": normalize_hotkey(self.summary_hotkey_input.text()),
+            "TRANSLATION_HOTKEY": normalize_hotkey(self.translation_hotkey_input.text()),
             "QUIT_HOTKEY": normalize_hotkey(self.quit_hotkey_input.text()),
             "ENABLE_GUI": self.enable_gui_checkbox.isChecked(),
             "GUI_START_MINIMIZED": self.gui_start_minimized_checkbox.isChecked(),

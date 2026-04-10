@@ -53,6 +53,11 @@ def run_gui(settings: Settings, minimized: bool = False) -> None:
         settings = updated_settings
         minimized = minimized or settings.gui_start_minimized
 
+    if not settings.refinement_hotkeys_enabled:
+        line1, line2 = settings.refinement_warning_lines
+        logger.warning(line1)
+        logger.warning(line2)
+
     bridge = STTCBridge(settings)
 
     settings_window: SettingsWindow | None = None

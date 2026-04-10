@@ -1,4 +1,4 @@
-﻿"""CLI entrypoint for sttc."""
+"""CLI entrypoint for sttc."""
 
 from __future__ import annotations
 
@@ -101,7 +101,6 @@ def _has_interactive_terminal() -> bool:
 
 
 def _prepare_bundled_default_command() -> None:
-    # Double-clicking bundled sttc.exe provides no args; default to GUI mode.
     if _is_bundled_runtime() and len(sys.argv) == 1:
         sys.argv.extend(["run", "--gui"])
 
@@ -174,9 +173,6 @@ def _load_run_onboarding_gui() -> Callable[[Settings], Settings | None]:
     return run_onboarding_gui
 
 
-
-
-
 def _set_or_clear_env(key: str, value: str | None) -> None:
     if value is None or value == "":
         os.environ.pop(key, None)
@@ -187,10 +183,15 @@ def _set_or_clear_env(key: str, value: str | None) -> None:
 def _sync_process_env(settings: Settings) -> None:
     _set_or_clear_env("OPENAI_API_KEY", settings.openai_api_key)
     _set_or_clear_env("STT_MODEL", settings.stt_model)
+    _set_or_clear_env("REFINE_MODEL", settings.refine_model)
     _set_or_clear_env("STT_WHISPER_MODEL", settings.stt_whisper_model)
     _set_or_clear_env("STT_MODEL_CACHE_DIR", settings.stt_model_cache_dir)
     _set_or_clear_env("RECORDING_MODE", settings.recording_mode)
     _set_or_clear_env("RECORDING_HOTKEY", settings.recording_hotkey)
+    _set_or_clear_env("REFINE_HOTKEY", settings.refine_hotkey)
+    _set_or_clear_env("RECORD_AND_REFINE_HOTKEY", settings.record_and_refine_hotkey)
+    _set_or_clear_env("SUMMARY_HOTKEY", settings.summary_hotkey)
+    _set_or_clear_env("TRANSLATION_HOTKEY", settings.translation_hotkey)
     _set_or_clear_env("QUIT_HOTKEY", settings.quit_hotkey)
     _set_or_clear_env("STT_CHUNK_SECONDS", str(settings.stt_chunk_seconds))
     _set_or_clear_env("SAMPLE_RATE_TARGET", str(settings.sample_rate_target))
@@ -201,6 +202,14 @@ def _sync_process_env(settings: Settings) -> None:
         "ONBOARDING_VERSION",
         None if settings.onboarding_version is None else str(settings.onboarding_version),
     )
+
+
+def _print_refinement_warning(settings: Settings) -> None:
+    if settings.refinement_hotkeys_enabled:
+        return
+    line1, line2 = settings.refinement_warning_lines
+    click.echo(line1, err=True)
+    click.echo(line2, err=True)
 
 
 def _prompt_hotkey_settings(defaults: OnboardingValues) -> tuple[str, str, str]:
@@ -384,6 +393,8 @@ def cmd_run(ctx: click.Context, gui: bool, minimized: bool) -> None:
             raise click.ClickException(onboarding_required_message())
         settings = run_cli_onboarding(settings)
 
+    _print_refinement_warning(settings)
+
     if use_gui:
         start_minimized = minimized or settings.gui_start_minimized
         _load_run_gui()(settings, start_minimized)
@@ -413,7 +424,6 @@ def cmd_setup(ctx: click.Context, gui: bool) -> None:
     _sync_process_env(new_settings)
 
 
-
 @cli_group.command("version", help="Print the application version.")
 def cmd_version() -> None:
     click.echo(__version__)
@@ -429,6 +439,7 @@ def cmd_settings(ctx: click.Context) -> None:
     click.echo(f"log_level={settings.log_level}")
     click.echo(f"onboarding_version={settings.onboarding_version}")
     click.echo(f"stt_model={settings.stt_model}")
+    click.echo(f"refine_model={settings.refine_model}")
     click.echo(f"stt_chunk_seconds={settings.stt_chunk_seconds}")
     click.echo(f"stt_whisper_model={settings.stt_whisper_model}")
     click.echo(f"stt_model_cache_dir={settings.stt_model_cache_dir}")
@@ -436,6 +447,10 @@ def cmd_settings(ctx: click.Context) -> None:
     click.echo(f"channels={settings.channels}")
     click.echo(f"recording_mode={settings.recording_mode}")
     click.echo(f"recording_hotkey={settings.recording_hotkey}")
+    click.echo(f"refine_hotkey={settings.refine_hotkey}")
+    click.echo(f"record_and_refine_hotkey={settings.record_and_refine_hotkey}")
+    click.echo(f"summary_hotkey={settings.summary_hotkey}")
+    click.echo(f"translation_hotkey={settings.translation_hotkey}")
     click.echo(f"quit_hotkey={settings.quit_hotkey}")
     click.echo(f"enable_gui={settings.enable_gui}")
     click.echo(f"gui_start_minimized={settings.gui_start_minimized}")

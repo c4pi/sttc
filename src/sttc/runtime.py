@@ -13,8 +13,9 @@ from typing import TYPE_CHECKING, Literal
 
 from pynput import keyboard
 
-from sttc.clipboard import copy_to_clipboard
+from sttc.clipboard import copy_to_clipboard, get_clipboard_text
 from sttc.recorder import AppState, HotkeyListener, QueueItem, recording_loop
+from sttc.refiner import RefinerMode, process_text
 from sttc.transcriber import TranscriberFn, build_transcriber, should_announce_model_download
 
 if TYPE_CHECKING:
@@ -35,11 +36,12 @@ StopRequestedFn = Callable[[], None]
 EngineLifecycleFn = Callable[[], None]
 EngineReadyChangedFn = Callable[[bool], None]
 EngineStatusChangedFn = Callable[[str], None]
+ClipboardQueueItem = tuple[RefinerMode, str | None]
 
 
 def _run_notification_command(command: list[str]) -> bool:
     try:
-        result = subprocess.run(  # noqa: S603 - command list is hardcoded in _notify_copied
+        result = subprocess.run(  # noqa: S603 - command list is hardcoded in notification helpers
             command,
             check=False,
             stdout=subprocess.DEVNULL,
@@ -63,6 +65,36 @@ def _notify_copied() -> None:
         if _run_notification_command(command):
             return
     print("\a", end="", flush=True)
+
+
+def _notify_refined() -> None:
+    if sys.platform == "win32":  # pragma: no cover - platform dependent
+        winsound.Beep(1200, 120)
+        winsound.Beep(1200, 120)
+        return
+    if sys.platform == "darwin":  # pragma: no cover - platform dependent
+        _run_notification_command(["osascript", "-e", "beep", "-e", "beep"])
+        return
+    for _ in range(2):
+        for command in (
+            ["paplay", "/usr/share/sounds/freedesktop/stereo/complete.oga"],
+            ["canberra-gtk-play", "--id", "complete"],
+        ):
+            if _run_notification_command(command):
+                break
+        else:
+            print("\a", end="", flush=True)
+
+
+def _notify_error() -> None:
+    if sys.platform == "win32":  # pragma: no cover - platform dependent
+        winsound.Beep(440, 160)
+        winsound.Beep(330, 200)
+        return
+    if sys.platform == "darwin":  # pragma: no cover - platform dependent
+        _run_notification_command(["osascript", "-e", "beep", "-e", "delay 0.1", "-e", "beep"])
+        return
+    print("\a\a", end="", flush=True)
 
 
 class RuntimeController:
@@ -93,6 +125,7 @@ class RuntimeController:
 
         self.state = AppState()
         self.audio_queue: queue.Queue[QueueItem] = queue.Queue()
+        self.clipboard_queue: queue.Queue[ClipboardQueueItem] = queue.Queue()
         self.stop_event = threading.Event()
 
         self._state_lock = threading.Lock()
@@ -101,11 +134,22 @@ class RuntimeController:
         self._started = False
         self._transcriber_ready = threading.Event()
         self._startup_error: str | None = None
+        self._record_and_refine_sessions: set[int] = set()
+        self._pressed_aux_keys: set[str] = set()
+        self._active_aux_hotkeys: set[str] = set()
 
         self._transcribe: TranscriberFn | None = None
         self._recorder_thread: threading.Thread | None = None
         self._transcriber_thread: threading.Thread | None = None
+        self._clipboard_thread: threading.Thread | None = None
         self._keyboard_listener: keyboard.Listener | None = None
+        self._recording_listener: HotkeyListener | None = None
+
+        self._refine_hotkey_keys: frozenset[str] = frozenset()
+        self._record_and_refine_hotkey_keys: frozenset[str] = frozenset()
+        self._summary_hotkey_keys: frozenset[str] = frozenset()
+        self._translation_hotkey_keys: frozenset[str] = frozenset()
+        self._update_aux_hotkey_bindings()
 
     @property
     def is_running(self) -> bool:
@@ -126,7 +170,6 @@ class RuntimeController:
         self._safe_callback(self.on_engine_status_changed, message)
 
     def _current_state(self) -> RuntimeState:
-        # Keep the UI in "recording" while chunk transcription runs in parallel.
         if self.state.is_recording():
             return "recording"
         if self._transcribing:
@@ -155,8 +198,13 @@ class RuntimeController:
     def _on_session_started(self, _session_id: int) -> None:
         self._emit_state_if_changed()
 
-    def _on_session_stopped(self, _session_id: int | None) -> None:
+    def _on_session_stopped(self, session_id: int | None) -> None:
         self._emit_state_if_changed()
+        if session_id is None:
+            return
+        if session_id not in self._record_and_refine_sessions:
+            return
+        self._record_and_refine_sessions.add(session_id)
 
     def _on_quit_requested(self) -> None:
         self._safe_callback(self.on_stop_requested)
@@ -185,6 +233,55 @@ class RuntimeController:
             self._emit_engine_status(self._waiting_status_message())
             return False
         return True
+
+    def _update_aux_hotkey_bindings(self) -> None:
+        self._refine_hotkey_keys = frozenset()
+        self._record_and_refine_hotkey_keys = frozenset()
+        self._summary_hotkey_keys = frozenset()
+        self._translation_hotkey_keys = frozenset()
+        if not self.settings.refinement_hotkeys_enabled:
+            return
+        self._refine_hotkey_keys, _ = HotkeyListener.parse_hotkey(self.settings.refine_hotkey)
+        self._record_and_refine_hotkey_keys, _ = HotkeyListener.parse_hotkey(self.settings.record_and_refine_hotkey)
+        self._summary_hotkey_keys, _ = HotkeyListener.parse_hotkey(self.settings.summary_hotkey)
+        self._translation_hotkey_keys, _ = HotkeyListener.parse_hotkey(self.settings.translation_hotkey)
+
+    def _copy_result_to_clipboard(self, text: str, *, refined: bool) -> None:
+        copy_to_clipboard(text)
+        if refined:
+            _notify_refined()
+        else:
+            _notify_copied()
+
+    def _run_llm_mode(self, text: str, mode: RefinerMode) -> str:
+        return process_text(text, mode, self.settings)
+
+    def _process_final_transcript(self, session_id: int, full_text: str) -> None:
+        should_refine = session_id in self._record_and_refine_sessions
+        if not should_refine:
+            try:
+                self._copy_result_to_clipboard(full_text, refined=False)
+                logger.info("Transcript copied to clipboard")
+                self._emit_transcription(full_text)
+            except RuntimeError as exc:
+                logger.warning("Transcript available above, but clipboard copy is unavailable: %s", exc)
+                self._emit_error(str(exc))
+            except Exception as exc:
+                logger.exception("Failed to copy to clipboard")
+                self._emit_error(f"Failed to copy transcript to clipboard: {exc}")
+            return
+
+        try:
+            refined_text = self._run_llm_mode(full_text, "refine")
+            self._copy_result_to_clipboard(refined_text, refined=True)
+            logger.info("Refined transcript copied to clipboard")
+            self._emit_transcription(refined_text)
+        except Exception as exc:
+            logger.exception("Transcript refinement failed")
+            self._emit_error(f"Transcript refinement failed: {exc}")
+            _notify_error()
+        finally:
+            self._record_and_refine_sessions.discard(session_id)
 
     def _transcription_loop(self) -> None:
         if self.settings.stt_model and not self.settings.openai_api_key:
@@ -234,21 +331,140 @@ class RuntimeController:
                 full_text = self.state.finish_transcript(session_id)
                 if full_text:
                     logger.info("Full transcription: %s", full_text)
-                    try:
-                        copy_to_clipboard(full_text)
-                        _notify_copied()
-                        logger.info("Transcript copied to clipboard")
-                    except RuntimeError as exc:
-                        logger.warning("Transcript available above, but clipboard copy is unavailable: %s", exc)
-                        self._emit_error(str(exc))
-                    except Exception as exc:
-                        logger.exception("Failed to copy to clipboard")
-                        self._emit_error(f"Failed to copy transcript to clipboard: {exc}")
-                    self._emit_transcription(full_text)
+                    self._process_final_transcript(session_id, full_text)
                 else:
                     logger.debug("Full transcription: (silence)")
+                    self._record_and_refine_sessions.discard(session_id)
 
             self.audio_queue.task_done()
+
+    def _clipboard_loop(self) -> None:
+        while True:
+            if self.stop_event.is_set() and self.clipboard_queue.empty():
+                break
+
+            try:
+                mode, text = self.clipboard_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            self._set_transcribing(True)
+            try:
+                source_text = text if text is not None else get_clipboard_text()
+                result_text = self._run_llm_mode(source_text, mode)
+                self._copy_result_to_clipboard(result_text, refined=True)
+                self._emit_transcription(result_text)
+                logger.info("Clipboard %s result copied to clipboard", mode)
+            except Exception as exc:
+                logger.exception("Clipboard %s failed", mode)
+                self._emit_error(str(exc))
+                _notify_error()
+            finally:
+                self._set_transcribing(False)
+                self.clipboard_queue.task_done()
+
+    def _queue_clipboard_mode(self, mode: RefinerMode) -> None:
+        if not self.settings.refinement_hotkeys_enabled:
+            self._emit_error("Refinement requires OPENAI_API_KEY.")
+            return
+        self.clipboard_queue.put((mode, None))
+
+    def _start_record_and_refine_session(self) -> None:
+        if self.state.is_recording():
+            self._emit_error("A recording is already in progress.")
+            _notify_error()
+            return
+        if not self._can_start_recording():
+            _notify_error()
+            return
+        session_id = self.state.start_session()
+        self._record_and_refine_sessions.add(session_id)
+        self._on_session_started(session_id)
+        logger.info("Session %s started (record and refine)", session_id)
+
+    def _stop_record_and_refine_session(self) -> None:
+        if not self.state.is_recording():
+            return
+        session_id = self.state.session_id
+        if session_id is None or session_id not in self._record_and_refine_sessions:
+            self._emit_error("Record-and-refine hotkey cannot stop a regular recording.")
+            _notify_error()
+            return
+        stopped_session = self.state.stop_session()
+        self._emit_state_if_changed()
+        logger.info("Finishing record-and-refine session %s", stopped_session)
+
+    def _handle_aux_press(self, key: keyboard.Key | keyboard.KeyCode) -> None:
+        key_id = HotkeyListener.key_to_identifier(key)
+        if key_id:
+            self._pressed_aux_keys.add(key_id)
+
+        if not self.settings.refinement_hotkeys_enabled:
+            return
+
+        if self._refine_hotkey_keys.issubset(self._pressed_aux_keys) and "refine" not in self._active_aux_hotkeys:
+            self._active_aux_hotkeys.add("refine")
+            self._queue_clipboard_mode("refine")
+
+        if self._summary_hotkey_keys.issubset(self._pressed_aux_keys) and "summary" not in self._active_aux_hotkeys:
+            self._active_aux_hotkeys.add("summary")
+            self._queue_clipboard_mode("summary")
+
+        if self._translation_hotkey_keys.issubset(self._pressed_aux_keys) and "translation" not in self._active_aux_hotkeys:
+            self._active_aux_hotkeys.add("translation")
+            self._queue_clipboard_mode("translation")
+
+        combo_pressed = self._record_and_refine_hotkey_keys.issubset(self._pressed_aux_keys)
+        if not combo_pressed or "record_and_refine" in self._active_aux_hotkeys:
+            return
+
+        self._active_aux_hotkeys.add("record_and_refine")
+        if self.settings.recording_mode == "toggle":
+            if self.state.is_recording():
+                self._stop_record_and_refine_session()
+            else:
+                self._start_record_and_refine_session()
+            return
+
+        if not self.state.is_recording():
+            self._start_record_and_refine_session()
+
+    def _handle_aux_release(self, key: keyboard.Key | keyboard.KeyCode) -> None:
+        key_id = HotkeyListener.key_to_identifier(key)
+        if key_id:
+            self._pressed_aux_keys.discard(key_id)
+
+        if "refine" in self._active_aux_hotkeys and not self._refine_hotkey_keys.issubset(self._pressed_aux_keys):
+            self._active_aux_hotkeys.discard("refine")
+        if "summary" in self._active_aux_hotkeys and not self._summary_hotkey_keys.issubset(self._pressed_aux_keys):
+            self._active_aux_hotkeys.discard("summary")
+        if "translation" in self._active_aux_hotkeys and not self._translation_hotkey_keys.issubset(self._pressed_aux_keys):
+            self._active_aux_hotkeys.discard("translation")
+
+        combo_pressed = self._record_and_refine_hotkey_keys.issubset(self._pressed_aux_keys)
+        if not combo_pressed:
+            self._active_aux_hotkeys.discard("record_and_refine")
+
+        if self.settings.recording_mode != "hold" or combo_pressed:
+            return
+
+        session_id = self.state.session_id
+        if self.state.is_recording() and session_id is not None and session_id in self._record_and_refine_sessions:
+            stopped_session = self.state.stop_session()
+            self._emit_state_if_changed()
+            logger.info("Finishing record-and-refine session %s", stopped_session)
+
+    def _on_keyboard_press(self, key: keyboard.Key | keyboard.KeyCode) -> bool | None:
+        self._handle_aux_press(key)
+        if self._recording_listener is None:
+            return None
+        return self._recording_listener.on_press(key)
+
+    def _on_keyboard_release(self, key: keyboard.Key | keyboard.KeyCode) -> bool | None:
+        self._handle_aux_release(key)
+        if self._recording_listener is None:
+            return None
+        return self._recording_listener.on_release(key)
 
     def start(self) -> None:
         if self._started:
@@ -258,6 +474,9 @@ class RuntimeController:
         self._transcribe = None
         self._transcriber_ready.clear()
         self._startup_error = None
+        self._pressed_aux_keys.clear()
+        self._active_aux_hotkeys.clear()
+        self._record_and_refine_sessions.clear()
         self._emit_engine_ready(False)
         self._emit_engine_status(self._startup_status_message())
 
@@ -274,8 +493,9 @@ class RuntimeController:
             daemon=True,
         )
         self._transcriber_thread = threading.Thread(target=self._transcription_loop, daemon=True)
+        self._clipboard_thread = threading.Thread(target=self._clipboard_loop, daemon=True)
 
-        listener = HotkeyListener(
+        self._recording_listener = HotkeyListener(
             self.state,
             self.stop_event,
             recording_mode=self.settings.recording_mode,
@@ -287,14 +507,15 @@ class RuntimeController:
             on_quit=self._on_quit_requested,
         )
         self._keyboard_listener = keyboard.Listener(
-            on_press=listener.on_press,
-            on_release=listener.on_release,
+            on_press=self._on_keyboard_press,
+            on_release=self._on_keyboard_release,
             suppress=False,
         )
         self._keyboard_listener.daemon = True
 
         self._recorder_thread.start()
         self._transcriber_thread.start()
+        self._clipboard_thread.start()
         self._keyboard_listener.start()
         self._ensure_listener_started()
 
@@ -359,19 +580,27 @@ class RuntimeController:
             self._keyboard_listener.join(timeout=1.0)
 
         self.audio_queue.join()
+        self.clipboard_queue.join()
 
         if self._recorder_thread is not None:
             self._recorder_thread.join(timeout=1.0)
         if self._transcriber_thread is not None:
             self._transcriber_thread.join(timeout=1.0)
+        if self._clipboard_thread is not None:
+            self._clipboard_thread.join(timeout=1.0)
 
         self._recorder_thread = None
         self._transcriber_thread = None
+        self._clipboard_thread = None
         self._keyboard_listener = None
+        self._recording_listener = None
         self._transcribe = None
         self._started = False
         self._transcriber_ready.clear()
         self._startup_error = None
+        self._record_and_refine_sessions.clear()
+        self._pressed_aux_keys.clear()
+        self._active_aux_hotkeys.clear()
         self._emit_engine_ready(False)
         self._emit_engine_status("Stopped")
         self._set_transcribing(False)
@@ -380,6 +609,7 @@ class RuntimeController:
 
     def apply_settings(self, settings: Settings, *, restart: bool = True) -> None:
         self.settings = settings
+        self._update_aux_hotkey_bindings()
         if not restart:
             return
 

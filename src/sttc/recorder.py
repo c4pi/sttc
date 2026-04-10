@@ -268,6 +268,10 @@ class HotkeyListener:
         return cls._canonical_name(name)
 
     @classmethod
+    def key_to_identifier(cls, key: KeyLike) -> str | None:
+        return cls._key_to_identifier(key)
+
+    @classmethod
     def _parse_hotkey(cls, hotkey: str) -> tuple[frozenset[str], str]:
         raw_parts = [part.strip().lower() for part in hotkey.split("+")]
         if not raw_parts or any(not part for part in raw_parts):
@@ -298,6 +302,10 @@ class HotkeyListener:
             display_parts.append(cls._format_key(key_id))
 
         return frozenset(parsed_keys), "+".join(display_parts)
+
+    @classmethod
+    def parse_hotkey(cls, hotkey: str) -> tuple[frozenset[str], str]:
+        return cls._parse_hotkey(hotkey)
 
     def on_press(self, key: KeyLike) -> bool | None:
         key_id = self._key_to_identifier(key)
