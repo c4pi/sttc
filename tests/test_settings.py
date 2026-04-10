@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from sttc.settings import CURRENT_ONBOARDING_VERSION, get_settings, resolve_env_file_path
+import pytest
+
+from sttc.settings import CURRENT_ONBOARDING_VERSION, Settings, get_settings, resolve_env_file_path
 
 
 def test_resolve_env_file_path_uses_source_checkout_root(monkeypatch) -> None:
@@ -44,3 +46,34 @@ def test_get_settings_uses_source_env_even_when_cwd_changes(monkeypatch, tmp_pat
     assert settings.onboarding_version == CURRENT_ONBOARDING_VERSION
     assert settings.enable_gui is True
     assert settings.gui_start_minimized is True
+
+
+def test_settings_allow_duplicate_refinement_hotkeys_without_api_key() -> None:
+    settings = Settings(_env_file=None, openai_api_key=None, recording_hotkey="ctrl+alt+a", refine_hotkey="ctrl+alt+a")
+
+    assert settings.refinement_hotkeys_enabled is False
+
+
+def test_settings_reject_duplicate_refinement_hotkeys_with_api_key() -> None:
+    with pytest.raises(ValueError, match="must be different"):
+        Settings(_env_file=None, openai_api_key="example-api-key", recording_hotkey="ctrl+alt+a", refine_hotkey="ctrl+alt+a") # pragma: allowlist secret
+
+
+def test_refinement_warning_lines_include_active_hotkeys() -> None:
+    settings = Settings(_env_file=None)
+
+    line1, line2 = settings.refinement_warning_lines
+
+    assert "Ctrl+Alt+R" in line1
+    assert "Ctrl+Alt+W" in line1
+    assert "Ctrl+Alt+S" in line1
+    assert "Ctrl+Alt+T" in line1
+    assert "OPENAI_API_KEY" in line2
+
+
+def test_settings_expose_summary_and_translation_hotkeys() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.summary_hotkey == "ctrl+alt+s"
+    assert settings.translation_hotkey == "ctrl+alt+t"
+    assert not hasattr(settings, "grammar_hotkey")

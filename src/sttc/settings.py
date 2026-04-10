@@ -8,7 +8,7 @@ import shutil
 import sys
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 APP_NAME = "sttc"
@@ -16,6 +16,14 @@ ENV_FILENAME = ".env"
 ENV_EXAMPLE_FILENAME = ".env.example"
 WHISPER_SAMPLE_RATE = 16000
 CURRENT_ONBOARDING_VERSION = 1
+_DEFAULT_HOTKEYS = {
+    "recording_hotkey": "ctrl+alt+a",
+    "refine_hotkey": "ctrl+alt+r",
+    "record_and_refine_hotkey": "ctrl+alt+w",
+    "summary_hotkey": "ctrl+alt+s",
+    "translation_hotkey": "ctrl+alt+t",
+    "quit_hotkey": "ctrl+alt+q",
+}
 
 
 def is_bundled_executable() -> bool:
@@ -97,6 +105,10 @@ def resolve_env_file_path() -> Path:
     return get_user_env_file_path()
 
 
+def format_hotkey(hotkey: str) -> str:
+    return "+".join(part.upper() if len(part) == 1 else part.capitalize() for part in hotkey.split("+"))
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file_encoding="utf-8",
@@ -122,14 +134,19 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
 
     stt_model: str | None = None
+    refine_model: str = "gpt-4.1-mini"
     stt_chunk_seconds: int = Field(default=15, ge=1)
     stt_whisper_model: str = "base"
     stt_model_cache_dir: str | None = None
     sample_rate_target: int = Field(default=WHISPER_SAMPLE_RATE, ge=8000)
     channels: int = Field(default=1, ge=1)
     recording_mode: Literal["hold", "toggle"] = "toggle"
-    recording_hotkey: str = "ctrl+alt+a"
-    quit_hotkey: str = "ctrl+alt+q"
+    recording_hotkey: str = _DEFAULT_HOTKEYS["recording_hotkey"]
+    refine_hotkey: str = _DEFAULT_HOTKEYS["refine_hotkey"]
+    record_and_refine_hotkey: str = _DEFAULT_HOTKEYS["record_and_refine_hotkey"]
+    summary_hotkey: str = _DEFAULT_HOTKEYS["summary_hotkey"]
+    translation_hotkey: str = _DEFAULT_HOTKEYS["translation_hotkey"]
+    quit_hotkey: str = _DEFAULT_HOTKEYS["quit_hotkey"]
     enable_gui: bool = False
     gui_start_minimized: bool = False
 
@@ -153,21 +170,24 @@ class Settings(BaseSettings):
             return value
         return value.strip().lower()
 
-    @field_validator("recording_hotkey", mode="before")
+    @field_validator(
+        "recording_hotkey",
+        "refine_hotkey",
+        "record_and_refine_hotkey",
+        "summary_hotkey",
+        "translation_hotkey",
+        "quit_hotkey",
+        mode="before",
+    )
     @classmethod
-    def _coerce_recording_hotkey(cls, value: object) -> object:
+    def _coerce_hotkey(cls, value: object, info: ValidationInfo) -> object:
         if not isinstance(value, str):
             return value
         normalized = value.strip().lower().replace(" ", "")
-        return normalized or "ctrl+alt+a"
-
-    @field_validator("quit_hotkey", mode="before")
-    @classmethod
-    def _coerce_quit_hotkey(cls, value: object) -> object:
-        if not isinstance(value, str):
-            return value
-        normalized = value.strip().lower().replace(" ", "")
-        return normalized or "ctrl+alt+q"
+        field_name = info.field_name
+        if field_name is None:
+            return normalized
+        return normalized or _DEFAULT_HOTKEYS[field_name]
 
     @field_validator("stt_model", "stt_model_cache_dir", mode="before")
     @classmethod
@@ -179,6 +199,14 @@ class Settings(BaseSettings):
             return None
         return normalized
 
+    @field_validator("refine_model", mode="before")
+    @classmethod
+    def _coerce_refine_model(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip()
+        return normalized or "gpt-4.1-mini"
+
     @field_validator("sample_rate_target", mode="before")
     @classmethod
     def _force_whisper_sample_rate(cls, _value: object) -> int:
@@ -186,9 +214,27 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_hotkeys(self) -> Settings:
-        if self.recording_hotkey == self.quit_hotkey:
-            msg = "recording_hotkey and quit_hotkey must be different"
-            raise ValueError(msg)
+        active_hotkeys = {
+            "recording_hotkey": self.recording_hotkey,
+            "quit_hotkey": self.quit_hotkey,
+        }
+        if self.refinement_hotkeys_enabled:
+            active_hotkeys.update(
+                {
+                    "refine_hotkey": self.refine_hotkey,
+                    "record_and_refine_hotkey": self.record_and_refine_hotkey,
+                    "summary_hotkey": self.summary_hotkey,
+                    "translation_hotkey": self.translation_hotkey,
+                }
+            )
+
+        seen: dict[str, str] = {}
+        for field_name, hotkey in active_hotkeys.items():
+            other = seen.get(hotkey)
+            if other is not None:
+                msg = f"{field_name} and {other} must be different"
+                raise ValueError(msg)
+            seen[hotkey] = field_name
         return self
 
     @property
@@ -196,6 +242,19 @@ class Settings(BaseSettings):
         if self.stt_model_cache_dir:
             return Path(self.stt_model_cache_dir).expanduser()
         return get_default_model_cache_dir()
+
+    @property
+    def refinement_hotkeys_enabled(self) -> bool:
+        return bool(self.openai_api_key and self.openai_api_key.strip())
+
+    @property
+    def refinement_warning_lines(self) -> tuple[str, str]:
+        return (
+            "WARNING: No OPENAI_API_KEY found. Refinement hotkeys "
+            f"({format_hotkey(self.refine_hotkey)}, {format_hotkey(self.record_and_refine_hotkey)}, "
+            f"{format_hotkey(self.summary_hotkey)}, {format_hotkey(self.translation_hotkey)}) are disabled.",
+            "   Set OPENAI_API_KEY in your .env to enable them.",
+        )
 
 
 def get_settings() -> Settings:

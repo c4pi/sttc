@@ -1,11 +1,23 @@
-﻿# sttc
+# sttc
 
 Hotkey-driven speech-to-text clipboard tool.
 
-1. Press your hotkey (default: `Ctrl+Alt+A`) to start recording.
-2. Press the same hotkey again to finish transcription.
-3. Transcript is copied to clipboard.
-4. Use your quit hotkey (default: `Ctrl+Alt+Q`) to exit the app.
+## Hotkeys
+
+| Hotkey | Function |
+| --- | --- |
+| `Ctrl+Alt+A` | Record audio and copy the raw transcript to the clipboard |
+| `Ctrl+Alt+W` | Record audio and copy the refined transcript to the clipboard |
+| `Ctrl+Alt+R` | Refine clipboard text in-place |
+| `Ctrl+Alt+S` | Summarize clipboard text in-place |
+| `Ctrl+Alt+T` | Translate clipboard text in-place |
+| `Ctrl+Alt+Q` | Quit the app |
+
+Refine keeps the input language unchanged, cleans up transcript artifacts, and corrects grammar and spelling without translating.
+Summary returns a summary in the same language as the input.
+Translation auto-detects the source language and translates `DE -> EN`, `EN -> DE`, and all other languages to English.
+
+Migration note: if you already use `RECORD_AND_REFINE_HOTKEY` in your `.env`, update it manually from `ctrl+alt+e` to `ctrl+alt+w`.
 
 ## Quick Install (Recommended)
 
@@ -72,21 +84,19 @@ uv run sttc setup --gui
 
 If you choose local Whisper during onboarding, the model download begins only after you finish setup.
 
-## Runtime configuration
+## Runtime Configuration
 
 `sttc` loads settings from `.env` using `src/sttc/settings.py`.
 
 - Source checkouts and editable installs backed by this repository use `./.env` relative to the project root, not the current shell working directory.
 - Installed packages and the bundled Windows executable use a per-user config file instead. On Windows that path is typically `%APPDATA%\\sttc\\.env`.
-
 - Set `STT_MODEL` for cloud transcription via LiteLLM.
-- Set `OPENAI_API_KEY` (or provider-specific key) when using cloud models.
+- Set `OPENAI_API_KEY` for cloud STT and the refine, summary, and translation hotkeys.
 - Leave `STT_MODEL` empty for local `faster-whisper`.
 - Set `STT_WHISPER_MODEL` to one of the curated onboarding defaults such as `tiny`, `base`, `small`, `medium`, or `large-v3`.
 - Set `STT_MODEL_CACHE_DIR` to override the local model cache location.
 - Set `RECORDING_MODE=toggle` (default) or `RECORDING_MODE=hold`.
-- Set `RECORDING_HOTKEY` (for example `ctrl+alt+a`, `ctrl+alt+r`, `f8`).
-- Set `QUIT_HOTKEY` for exiting the app (for example `ctrl+alt+q`, `ctrl+shift+escape`).
+- Set `RECORDING_HOTKEY`, `REFINE_HOTKEY`, `RECORD_AND_REFINE_HOTKEY`, `SUMMARY_HOTKEY`, `TRANSLATION_HOTKEY`, and `QUIT_HOTKEY` as needed.
 - Set `ONBOARDING_VERSION=1` when setup has completed successfully.
 
 ## Auto-Start
@@ -113,7 +123,7 @@ Build artifact:
 
 - `dist/sttc.exe`: Windows executable (no terminal window).
 
-## Development checks
+## Development Checks
 
 ```bash
 uv run pytest

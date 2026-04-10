@@ -17,12 +17,27 @@ def _print_banner(settings: Settings) -> None:
         logger.info("Mode               : CLOUD (%s)", settings.stt_model)
     else:
         logger.info("Mode               : LOCAL (%s)", settings.stt_whisper_model)
+    logger.info("Refine model       : %s", settings.refine_model)
     logger.info("Chunk duration     : %s s", settings.stt_chunk_seconds)
     logger.info("Target sample rate : %s Hz", settings.sample_rate_target)
     logger.info("Channels           : %s", settings.channels)
     logger.info("Recording mode     : %s", settings.recording_mode)
     logger.info("Recording hotkey   : %s", settings.recording_hotkey)
+    logger.info("Refine hotkey      : %s", settings.refine_hotkey if settings.refinement_hotkeys_enabled else "disabled")
+    logger.info(
+        "Record+refine key  : %s",
+        settings.record_and_refine_hotkey if settings.refinement_hotkeys_enabled else "disabled",
+    )
+    logger.info("Summary hotkey     : %s", settings.summary_hotkey if settings.refinement_hotkeys_enabled else "disabled")
+    logger.info(
+        "Translation hotkey : %s",
+        settings.translation_hotkey if settings.refinement_hotkeys_enabled else "disabled",
+    )
     logger.info("Quit hotkey        : %s", settings.quit_hotkey)
+    if not settings.refinement_hotkeys_enabled:
+        line1, line2 = settings.refinement_warning_lines
+        logger.warning(line1)
+        logger.warning(line2)
     logger.info("")
     if settings.recording_mode == "toggle":
         logger.info(
