@@ -129,6 +129,7 @@ class SettingsWindow(QDialog):
         self.record_and_refine_hotkey_input = QLineEdit(settings.record_and_refine_hotkey)
         self.summary_hotkey_input = QLineEdit(settings.summary_hotkey)
         self.translation_hotkey_input = QLineEdit(settings.translation_hotkey)
+        self.freestyle_hotkey_input = QLineEdit(settings.freestyle_hotkey)
         self.quit_hotkey_input = QLineEdit(settings.quit_hotkey)
 
         form.addRow("Recording Mode", self.recording_mode_combo)
@@ -137,6 +138,7 @@ class SettingsWindow(QDialog):
         form.addRow("Record & Refine Hotkey", self.record_and_refine_hotkey_input)
         form.addRow("Summary Hotkey", self.summary_hotkey_input)
         form.addRow("Translation Hotkey", self.translation_hotkey_input)
+        form.addRow("Freestyle Hotkey", self.freestyle_hotkey_input)
         form.addRow("Quit Hotkey", self.quit_hotkey_input)
         return tab
 
@@ -225,6 +227,7 @@ class SettingsWindow(QDialog):
                 "record_and_refine_hotkey": normalize_hotkey(self.record_and_refine_hotkey_input.text()),
                 "summary_hotkey": normalize_hotkey(self.summary_hotkey_input.text()),
                 "translation_hotkey": normalize_hotkey(self.translation_hotkey_input.text()),
+                "freestyle_hotkey": normalize_hotkey(self.freestyle_hotkey_input.text()),
             }
         )
         return Settings(**base_values)
@@ -272,6 +275,7 @@ class SettingsWindow(QDialog):
                 "record_and_refine_hotkey": normalize_hotkey(self.record_and_refine_hotkey_input.text()),
                 "summary_hotkey": normalize_hotkey(self.summary_hotkey_input.text()),
                 "translation_hotkey": normalize_hotkey(self.translation_hotkey_input.text()),
+                "freestyle_hotkey": normalize_hotkey(self.freestyle_hotkey_input.text()),
                 "quit_hotkey": normalize_hotkey(self.quit_hotkey_input.text()),
                 "enable_gui": self.enable_gui_checkbox.isChecked(),
                 "gui_start_minimized": self.gui_start_minimized_checkbox.isChecked(),
@@ -300,6 +304,7 @@ class SettingsWindow(QDialog):
             "RECORD_AND_REFINE_HOTKEY": normalize_hotkey(self.record_and_refine_hotkey_input.text()),
             "SUMMARY_HOTKEY": normalize_hotkey(self.summary_hotkey_input.text()),
             "TRANSLATION_HOTKEY": normalize_hotkey(self.translation_hotkey_input.text()),
+            "FREESTYLE_HOTKEY": normalize_hotkey(self.freestyle_hotkey_input.text()),
             "QUIT_HOTKEY": normalize_hotkey(self.quit_hotkey_input.text()),
             "ENABLE_GUI": self.enable_gui_checkbox.isChecked(),
             "GUI_START_MINIMIZED": self.gui_start_minimized_checkbox.isChecked(),
