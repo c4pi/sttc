@@ -15,7 +15,7 @@ from pynput import keyboard
 
 from sttc.clipboard import copy_to_clipboard, get_clipboard_text
 from sttc.recorder import AppState, HotkeyListener, QueueItem, recording_loop
-from sttc.refiner import RefinerMode, process_text
+from sttc.refiner import RefinerMode, process_freestyle, process_text
 from sttc.transcriber import TranscriberFn, build_transcriber, should_announce_model_download
 
 if TYPE_CHECKING:
@@ -149,6 +149,11 @@ class RuntimeController:
         self._record_and_refine_hotkey_keys: frozenset[str] = frozenset()
         self._summary_hotkey_keys: frozenset[str] = frozenset()
         self._translation_hotkey_keys: frozenset[str] = frozenset()
+        self._freestyle_hotkey_keys: frozenset[str] = frozenset()
+
+        self._freestyle_sessions: set[int] = set()
+        self._freestyle_clipboard: dict[int, str] = {}
+
         self._update_aux_hotkey_bindings()
 
     @property
@@ -239,12 +244,14 @@ class RuntimeController:
         self._record_and_refine_hotkey_keys = frozenset()
         self._summary_hotkey_keys = frozenset()
         self._translation_hotkey_keys = frozenset()
+        self._freestyle_hotkey_keys = frozenset()
         if not self.settings.refinement_hotkeys_enabled:
             return
         self._refine_hotkey_keys, _ = HotkeyListener.parse_hotkey(self.settings.refine_hotkey)
         self._record_and_refine_hotkey_keys, _ = HotkeyListener.parse_hotkey(self.settings.record_and_refine_hotkey)
         self._summary_hotkey_keys, _ = HotkeyListener.parse_hotkey(self.settings.summary_hotkey)
         self._translation_hotkey_keys, _ = HotkeyListener.parse_hotkey(self.settings.translation_hotkey)
+        self._freestyle_hotkey_keys, _ = HotkeyListener.parse_hotkey(self.settings.freestyle_hotkey)
 
     def _copy_result_to_clipboard(self, text: str, *, refined: bool) -> None:
         copy_to_clipboard(text)
@@ -257,6 +264,22 @@ class RuntimeController:
         return process_text(text, mode, self.settings)
 
     def _process_final_transcript(self, session_id: int, full_text: str) -> None:
+        # --- Freestyle branch ---
+        if session_id in self._freestyle_sessions:
+            clipboard_context = self._freestyle_clipboard.pop(session_id, "")
+            self._freestyle_sessions.discard(session_id)
+            try:
+                result = process_freestyle(full_text, clipboard_context, self.settings)
+                self._copy_result_to_clipboard(result, refined=True)
+                logger.info("Freestyle result copied to clipboard")
+                self._emit_transcription(result)
+            except Exception as exc:
+                logger.exception("Freestyle processing failed")
+                self._emit_error(f"Freestyle processing failed: {exc}")
+                _notify_error()
+            return
+
+        # --- Regular / record-and-refine branch ---
         should_refine = session_id in self._record_and_refine_sessions
         if not should_refine:
             try:
@@ -382,6 +405,36 @@ class RuntimeController:
         self._on_session_started(session_id)
         logger.info("Session %s started (record and refine)", session_id)
 
+    def _start_freestyle_session(self) -> None:
+        if self.state.is_recording():
+            self._emit_error("A recording is already in progress.")
+            _notify_error()
+            return
+        if not self._can_start_recording():
+            _notify_error()
+            return
+        try:
+            clipboard_snapshot = get_clipboard_text()
+        except Exception:
+            clipboard_snapshot = ""
+        session_id = self.state.start_session()
+        self._freestyle_sessions.add(session_id)
+        self._freestyle_clipboard[session_id] = clipboard_snapshot
+        self._on_session_started(session_id)
+        logger.info("Session %s started (freestyle, clipboard len=%d)", session_id, len(clipboard_snapshot))
+
+    def _stop_freestyle_session(self) -> None:
+        if not self.state.is_recording():
+            return
+        session_id = self.state.session_id
+        if session_id is None or session_id not in self._freestyle_sessions:
+            self._emit_error("Freestyle hotkey cannot stop a regular recording.")
+            _notify_error()
+            return
+        stopped_session = self.state.stop_session()
+        self._emit_state_if_changed()
+        logger.info("Finishing freestyle session %s", stopped_session)
+
     def _stop_record_and_refine_session(self) -> None:
         if not self.state.is_recording():
             return
@@ -416,18 +469,31 @@ class RuntimeController:
 
         combo_pressed = self._record_and_refine_hotkey_keys.issubset(self._pressed_aux_keys)
         if not combo_pressed or "record_and_refine" in self._active_aux_hotkeys:
+            pass
+        else:
+            self._active_aux_hotkeys.add("record_and_refine")
+            if self.settings.recording_mode == "toggle":
+                if self.state.is_recording():
+                    self._stop_record_and_refine_session()
+                else:
+                    self._start_record_and_refine_session()
+            elif not self.state.is_recording():
+                self._start_record_and_refine_session()
+
+        freestyle_pressed = self._freestyle_hotkey_keys.issubset(self._pressed_aux_keys)
+        if not freestyle_pressed or "freestyle" in self._active_aux_hotkeys:
             return
 
-        self._active_aux_hotkeys.add("record_and_refine")
+        self._active_aux_hotkeys.add("freestyle")
         if self.settings.recording_mode == "toggle":
             if self.state.is_recording():
-                self._stop_record_and_refine_session()
+                self._stop_freestyle_session()
             else:
-                self._start_record_and_refine_session()
+                self._start_freestyle_session()
             return
 
         if not self.state.is_recording():
-            self._start_record_and_refine_session()
+            self._start_freestyle_session()
 
     def _handle_aux_release(self, key: keyboard.Key | keyboard.KeyCode) -> None:
         key_id = HotkeyListener.key_to_identifier(key)
@@ -445,14 +511,23 @@ class RuntimeController:
         if not combo_pressed:
             self._active_aux_hotkeys.discard("record_and_refine")
 
-        if self.settings.recording_mode != "hold" or combo_pressed:
+        freestyle_pressed = self._freestyle_hotkey_keys.issubset(self._pressed_aux_keys)
+        if not freestyle_pressed:
+            self._active_aux_hotkeys.discard("freestyle")
+
+        if self.settings.recording_mode != "hold":
             return
 
         session_id = self.state.session_id
-        if self.state.is_recording() and session_id is not None and session_id in self._record_and_refine_sessions:
-            stopped_session = self.state.stop_session()
-            self._emit_state_if_changed()
-            logger.info("Finishing record-and-refine session %s", stopped_session)
+        if self.state.is_recording() and session_id is not None:
+            if session_id in self._record_and_refine_sessions and not combo_pressed:
+                stopped_session = self.state.stop_session()
+                self._emit_state_if_changed()
+                logger.info("Finishing record-and-refine session %s", stopped_session)
+            elif session_id in self._freestyle_sessions and not freestyle_pressed:
+                stopped_session = self.state.stop_session()
+                self._emit_state_if_changed()
+                logger.info("Finishing freestyle session %s (hold released)", stopped_session)
 
     def _on_keyboard_press(self, key: keyboard.Key | keyboard.KeyCode) -> bool | None:
         self._handle_aux_press(key)
@@ -477,6 +552,8 @@ class RuntimeController:
         self._pressed_aux_keys.clear()
         self._active_aux_hotkeys.clear()
         self._record_and_refine_sessions.clear()
+        self._freestyle_sessions.clear()
+        self._freestyle_clipboard.clear()
         self._emit_engine_ready(False)
         self._emit_engine_status(self._startup_status_message())
 
@@ -599,6 +676,8 @@ class RuntimeController:
         self._transcriber_ready.clear()
         self._startup_error = None
         self._record_and_refine_sessions.clear()
+        self._freestyle_sessions.clear()
+        self._freestyle_clipboard.clear()
         self._pressed_aux_keys.clear()
         self._active_aux_hotkeys.clear()
         self._emit_engine_ready(False)
