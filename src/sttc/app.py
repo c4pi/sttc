@@ -33,6 +33,10 @@ def _print_banner(settings: Settings) -> None:
         "Translation hotkey : %s",
         settings.translation_hotkey if settings.refinement_hotkeys_enabled else "disabled",
     )
+    logger.info(
+        "Freestyle hotkey   : %s",
+        settings.freestyle_hotkey if settings.refinement_hotkeys_enabled else "disabled",
+    )
     logger.info("Quit hotkey        : %s", settings.quit_hotkey)
     if not settings.refinement_hotkeys_enabled:
         line1, line2 = settings.refinement_warning_lines

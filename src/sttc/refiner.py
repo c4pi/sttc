@@ -36,6 +36,11 @@ TRANSLATION_PROMPT = (
     "Preserve the original meaning and tone as closely as possible. Return only the translated text."
 )
 
+FREESTYLE_SYSTEM_PROMPT = (
+    "You are a versatile assistant. The user will give you a spoken instruction followed by context from their clipboard.\n"
+    "Follow the instruction using the provided context. Return only the result — no preamble, no explanations."
+)
+
 
 def _system_prompt(mode: RefinerMode) -> str:
     if mode == "refine":
@@ -74,6 +79,55 @@ def _extract_message_content(response: Any) -> str:
                     return content.strip()
 
     return ""
+
+
+def process_freestyle(voice_prompt: str, clipboard_content: str, settings: Settings) -> str:
+    """Process a freestyle request combining a voice prompt with clipboard context."""
+    if not settings.openai_api_key:
+        msg = "Freestyle mode requires OPENAI_API_KEY."
+        raise RuntimeError(msg)
+
+    voice_prompt = voice_prompt.strip()
+    clipboard_content = clipboard_content.strip()
+
+    if not voice_prompt:
+        msg = "Voice prompt is empty."
+        raise RuntimeError(msg)
+
+    user_message = voice_prompt
+    if clipboard_content:
+        user_message = f"{voice_prompt}\n\n---\nContext (Clipboard):\n{clipboard_content}"
+
+    model_name = settings.refine_model.strip()
+    if not model_name:
+        msg = "REFINE_MODEL must not be empty."
+        raise RuntimeError(msg)
+
+    try:
+        litellm = importlib.import_module("litellm")
+        _configure_litellm_logging()
+    except Exception as exc:  # pragma: no cover - environment dependent
+        msg = f"Freestyle backend is unavailable: {exc!r}"
+        raise RuntimeError(msg) from exc
+
+    logger.info("Running freestyle mode with model: %s", model_name)
+    try:
+        response = litellm.completion(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": FREESTYLE_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+        )
+    except Exception as exc:  # pragma: no cover - backend/network dependent
+        msg = f"Freestyle request failed: {exc}"
+        raise RuntimeError(msg) from exc
+
+    result = _extract_message_content(response)
+    if not result:
+        msg = "Freestyle returned no text."
+        raise RuntimeError(msg)
+    return result
 
 
 def process_text(text: str, mode: RefinerMode, settings: Settings) -> str:

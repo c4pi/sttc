@@ -22,6 +22,7 @@ _DEFAULT_HOTKEYS = {
     "record_and_refine_hotkey": "ctrl+alt+w",
     "summary_hotkey": "ctrl+alt+s",
     "translation_hotkey": "ctrl+alt+t",
+    "freestyle_hotkey": "ctrl+alt+f",
     "quit_hotkey": "ctrl+alt+q",
 }
 
@@ -146,6 +147,7 @@ class Settings(BaseSettings):
     record_and_refine_hotkey: str = _DEFAULT_HOTKEYS["record_and_refine_hotkey"]
     summary_hotkey: str = _DEFAULT_HOTKEYS["summary_hotkey"]
     translation_hotkey: str = _DEFAULT_HOTKEYS["translation_hotkey"]
+    freestyle_hotkey: str = _DEFAULT_HOTKEYS["freestyle_hotkey"]
     quit_hotkey: str = _DEFAULT_HOTKEYS["quit_hotkey"]
     enable_gui: bool = False
     gui_start_minimized: bool = False
@@ -176,6 +178,7 @@ class Settings(BaseSettings):
         "record_and_refine_hotkey",
         "summary_hotkey",
         "translation_hotkey",
+        "freestyle_hotkey",
         "quit_hotkey",
         mode="before",
     )
@@ -225,6 +228,7 @@ class Settings(BaseSettings):
                     "record_and_refine_hotkey": self.record_and_refine_hotkey,
                     "summary_hotkey": self.summary_hotkey,
                     "translation_hotkey": self.translation_hotkey,
+                    "freestyle_hotkey": self.freestyle_hotkey,
                 }
             )
 
@@ -252,7 +256,8 @@ class Settings(BaseSettings):
         return (
             "WARNING: No OPENAI_API_KEY found. Refinement hotkeys "
             f"({format_hotkey(self.refine_hotkey)}, {format_hotkey(self.record_and_refine_hotkey)}, "
-            f"{format_hotkey(self.summary_hotkey)}, {format_hotkey(self.translation_hotkey)}) are disabled.",
+            f"{format_hotkey(self.summary_hotkey)}, {format_hotkey(self.translation_hotkey)}, "
+            f"{format_hotkey(self.freestyle_hotkey)}) are disabled.",
             "   Set OPENAI_API_KEY in your .env to enable them.",
         )
 
