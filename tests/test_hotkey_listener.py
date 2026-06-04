@@ -3,7 +3,7 @@ import threading
 from pynput import keyboard
 import pytest
 
-from sttc.recorder import AppState, HotkeyListener
+from sttc.recorder import AppState, HotkeyListener, is_combo_trigger, sync_modifier_state
 
 
 def test_toggle_mode_starts_and_stops_with_repeated_hotkey() -> None:
@@ -128,3 +128,78 @@ def test_invalid_hotkey_raises_value_error() -> None:
     stop_event = threading.Event()
     with pytest.raises(ValueError, match="Unsupported hotkey key"):
         HotkeyListener(state, stop_event, hotkey="ctrl+notakey")
+
+
+def test_is_combo_trigger_requires_non_modifier_key() -> None:
+    combo = frozenset({"ctrl", "alt", "q"})
+    assert is_combo_trigger(combo, "q") is True
+    assert is_combo_trigger(combo, "ctrl") is False
+    assert is_combo_trigger(combo, "alt") is False
+    assert is_combo_trigger(combo, None) is False
+
+
+def test_is_combo_trigger_modifier_only_combo_triggers_on_member() -> None:
+    combo = frozenset({"ctrl", "alt"})
+    assert is_combo_trigger(combo, "alt") is True
+    assert is_combo_trigger(combo, "shift") is False
+
+
+def test_sync_modifier_state_reconciles_with_os() -> None:
+    pressed = {"ctrl", "a"}
+    # OS reports only 'alt' physically held: 'ctrl' must drop, 'alt' must appear,
+    # the non-modifier 'a' must be left untouched.
+    sync_modifier_state(pressed, lambda: {"alt"})
+    assert pressed == {"alt", "a"}
+
+
+def test_sync_modifier_state_noop_without_probe() -> None:
+    pressed = {"ctrl", "alt"}
+    sync_modifier_state(pressed, None)
+    assert pressed == {"ctrl", "alt"}
+
+
+def test_quit_does_not_fire_from_stuck_modifiers() -> None:
+    state = AppState()
+    stop_event = threading.Event()
+    # OS reports nothing physically held; the listener should self-heal.
+    listener = HotkeyListener(state, stop_event, recording_mode="toggle", modifier_probe=set)
+    # Simulate ctrl+alt left "stuck" by missed key-up events (Alt+Tab / lock screen).
+    listener.pressed_keys.update({"ctrl", "alt"})
+
+    result = listener.on_press(keyboard.KeyCode.from_vk(81))  # 'q'
+
+    assert result is None
+    assert stop_event.is_set() is False
+    assert state.recording is False
+
+
+def test_quit_fires_when_modifiers_actually_held() -> None:
+    state = AppState()
+    stop_event = threading.Event()
+    listener = HotkeyListener(
+        state,
+        stop_event,
+        recording_mode="toggle",
+        modifier_probe=lambda: {"ctrl", "alt"},
+    )
+
+    result = listener.on_press(keyboard.KeyCode.from_vk(81))  # 'q'
+
+    assert result is False
+    assert stop_event.is_set() is True
+
+
+def test_recording_does_not_start_from_stuck_modifiers() -> None:
+    state = AppState()
+    stop_event = threading.Event()
+    listener = HotkeyListener(state, stop_event, recording_mode="toggle", modifier_probe=set)
+    listener.pressed_keys.update({"ctrl", "alt"})
+
+    # A lone non-trigger keystroke while modifiers are only "stuck" must not record.
+    listener.on_press(keyboard.KeyCode.from_char("b"))
+    assert state.recording is False
+
+    # And the real combo still works once the OS actually reports the modifiers.
+    listener.modifier_probe = lambda: {"ctrl", "alt"}
+    listener.on_press(keyboard.KeyCode.from_char("a"))
+    assert state.recording is True
