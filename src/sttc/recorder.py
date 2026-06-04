@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 import logging
 import queue
+import sys
 import threading
 import time
 from typing import ClassVar, Literal
@@ -16,6 +17,85 @@ logger = logging.getLogger(__name__)
 
 QueueItem = tuple[np.ndarray, int, int, bool]
 type KeyLike = keyboard.Key | keyboard.KeyCode
+
+# A callable returning the set of modifier identifiers ("ctrl", "alt", ...) the OS
+# currently reports as physically held, or ``None`` when the OS state is unavailable.
+ModifierProbe = Callable[[], "set[str] | None"]
+
+# Modifier identifiers tracked in the pressed-key sets.
+_MODIFIER_IDS: frozenset[str] = frozenset({"ctrl", "shift", "alt", "cmd"})
+
+# Virtual-key codes used to query the real keyboard state on Windows.
+_WIN_MODIFIER_VKS: dict[str, tuple[int, ...]] = {
+    "ctrl": (0x11,),  # VK_CONTROL
+    "shift": (0x10,),  # VK_SHIFT
+    "alt": (0x12,),  # VK_MENU
+    "cmd": (0x5B, 0x5C),  # VK_LWIN, VK_RWIN
+}
+
+if sys.platform == "win32":  # pragma: no cover - platform dependent
+    import ctypes
+
+    _user32 = ctypes.WinDLL("user32", use_last_error=True)
+else:  # pragma: no cover - platform dependent
+    _user32 = None
+
+
+def _query_windows_modifiers() -> set[str] | None:  # pragma: no cover - platform dependent
+    """Return modifiers the OS reports as physically held, via ``GetAsyncKeyState``."""
+    if _user32 is None:
+        return None
+    try:
+        pressed: set[str] = set()
+        for mod, vks in _WIN_MODIFIER_VKS.items():
+            if any(_user32.GetAsyncKeyState(vk) & 0x8000 for vk in vks):
+                pressed.add(mod)
+    except Exception:
+        # A throw inside a global-hook callback can kill the listener thread; never propagate.
+        return None
+    return pressed
+
+
+def default_modifier_probe() -> ModifierProbe | None:
+    """Return the platform's modifier probe, or ``None`` where unsupported."""
+    if sys.platform == "win32":
+        return _query_windows_modifiers
+    return None
+
+
+def sync_modifier_state(pressed_keys: set[str], probe: ModifierProbe | None) -> None:
+    """Reconcile tracked modifier keys with the real OS keyboard state.
+
+    Global low-level hooks routinely miss key-up events (Alt+Tab, lock screen, UAC,
+    focus changes), leaving modifiers stuck as "pressed" forever. Re-syncing on every
+    event lets a stuck modifier heal itself on the next keystroke. A ``None`` probe
+    (non-Windows, or unit tests) leaves the tracked set untouched.
+    """
+    if probe is None:
+        return
+    actual = probe()
+    if actual is None:
+        return
+    for mod in _MODIFIER_IDS:
+        if mod in actual:
+            pressed_keys.add(mod)
+        else:
+            pressed_keys.discard(mod)
+
+
+def is_combo_trigger(combo: frozenset[str], just_pressed: str | None) -> bool:
+    """Return True if ``just_pressed`` is the activating key of ``combo``.
+
+    A chord should fire on the key-down of its non-modifier key while the modifiers
+    are held, not merely because the combo is a subset of the tracked keys (which is
+    what makes stuck modifiers dangerous). Modifier-only combos trigger on any member.
+    """
+    if just_pressed is None:
+        return False
+    triggers = combo - _MODIFIER_IDS
+    if not triggers:
+        triggers = combo
+    return just_pressed in triggers
 
 
 @dataclass
@@ -213,6 +293,7 @@ class HotkeyListener:
         on_session_started: Callable[[int], None] | None = None,
         on_session_stopped: Callable[[int | None], None] | None = None,
         on_quit: Callable[[], None] | None = None,
+        modifier_probe: ModifierProbe | None = None,
     ) -> None:
         self.state = state
         self.stop_event = stop_event
@@ -225,6 +306,7 @@ class HotkeyListener:
         self.on_session_started = on_session_started
         self.on_session_stopped = on_session_stopped
         self.on_quit = on_quit
+        self.modifier_probe = modifier_probe
 
     @classmethod
     def _canonical_name(cls, name: str) -> str:
@@ -309,10 +391,11 @@ class HotkeyListener:
 
     def on_press(self, key: KeyLike) -> bool | None:
         key_id = self._key_to_identifier(key)
+        sync_modifier_state(self.pressed_keys, self.modifier_probe)
         if key_id:
             self.pressed_keys.add(key_id)
 
-        if self.quit_hotkey_keys.issubset(self.pressed_keys):
+        if is_combo_trigger(self.quit_hotkey_keys, key_id) and self.quit_hotkey_keys.issubset(self.pressed_keys):
             session_id = self.state.stop_session()
             if self.on_session_stopped is not None:
                 self.on_session_stopped(session_id)
@@ -324,6 +407,8 @@ class HotkeyListener:
 
         combo_pressed = self.hotkey_keys.issubset(self.pressed_keys)
         if not combo_pressed or self.combo_active:
+            return None
+        if not is_combo_trigger(self.hotkey_keys, key_id):
             return None
 
         self.combo_active = True
@@ -356,6 +441,7 @@ class HotkeyListener:
         key_id = self._key_to_identifier(key)
         if key_id:
             self.pressed_keys.discard(key_id)
+        sync_modifier_state(self.pressed_keys, self.modifier_probe)
 
         combo_pressed = self.hotkey_keys.issubset(self.pressed_keys)
         if not combo_pressed:

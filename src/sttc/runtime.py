@@ -14,7 +14,15 @@ from typing import TYPE_CHECKING, Literal
 from pynput import keyboard
 
 from sttc.clipboard import copy_to_clipboard, get_clipboard_text
-from sttc.recorder import AppState, HotkeyListener, QueueItem, recording_loop
+from sttc.recorder import (
+    AppState,
+    HotkeyListener,
+    QueueItem,
+    default_modifier_probe,
+    is_combo_trigger,
+    recording_loop,
+    sync_modifier_state,
+)
 from sttc.refiner import RefinerMode, process_freestyle, process_text
 from sttc.transcriber import TranscriberFn, build_transcriber, should_announce_model_download
 
@@ -132,6 +140,7 @@ class RuntimeController:
         self._last_state: RuntimeState | None = None
         self._transcribing = False
         self._started = False
+        self._modifier_probe = default_modifier_probe()
         self._transcriber_ready = threading.Event()
         self._startup_error: str | None = None
         self._record_and_refine_sessions: set[int] = set()
@@ -449,26 +458,41 @@ class RuntimeController:
 
     def _handle_aux_press(self, key: keyboard.Key | keyboard.KeyCode) -> None:
         key_id = HotkeyListener.key_to_identifier(key)
+        sync_modifier_state(self._pressed_aux_keys, self._modifier_probe)
         if key_id:
             self._pressed_aux_keys.add(key_id)
 
         if not self.settings.refinement_hotkeys_enabled:
             return
 
-        if self._refine_hotkey_keys.issubset(self._pressed_aux_keys) and "refine" not in self._active_aux_hotkeys:
+        if (
+            is_combo_trigger(self._refine_hotkey_keys, key_id)
+            and self._refine_hotkey_keys.issubset(self._pressed_aux_keys)
+            and "refine" not in self._active_aux_hotkeys
+        ):
             self._active_aux_hotkeys.add("refine")
             self._queue_clipboard_mode("refine")
 
-        if self._summary_hotkey_keys.issubset(self._pressed_aux_keys) and "summary" not in self._active_aux_hotkeys:
+        if (
+            is_combo_trigger(self._summary_hotkey_keys, key_id)
+            and self._summary_hotkey_keys.issubset(self._pressed_aux_keys)
+            and "summary" not in self._active_aux_hotkeys
+        ):
             self._active_aux_hotkeys.add("summary")
             self._queue_clipboard_mode("summary")
 
-        if self._translation_hotkey_keys.issubset(self._pressed_aux_keys) and "translation" not in self._active_aux_hotkeys:
+        if (
+            is_combo_trigger(self._translation_hotkey_keys, key_id)
+            and self._translation_hotkey_keys.issubset(self._pressed_aux_keys)
+            and "translation" not in self._active_aux_hotkeys
+        ):
             self._active_aux_hotkeys.add("translation")
             self._queue_clipboard_mode("translation")
 
-        combo_pressed = self._record_and_refine_hotkey_keys.issubset(self._pressed_aux_keys)
-        if not combo_pressed or "record_and_refine" in self._active_aux_hotkeys:
+        combo_triggered = is_combo_trigger(
+            self._record_and_refine_hotkey_keys, key_id
+        ) and self._record_and_refine_hotkey_keys.issubset(self._pressed_aux_keys)
+        if not combo_triggered or "record_and_refine" in self._active_aux_hotkeys:
             pass
         else:
             self._active_aux_hotkeys.add("record_and_refine")
@@ -480,8 +504,10 @@ class RuntimeController:
             elif not self.state.is_recording():
                 self._start_record_and_refine_session()
 
-        freestyle_pressed = self._freestyle_hotkey_keys.issubset(self._pressed_aux_keys)
-        if not freestyle_pressed or "freestyle" in self._active_aux_hotkeys:
+        freestyle_triggered = is_combo_trigger(
+            self._freestyle_hotkey_keys, key_id
+        ) and self._freestyle_hotkey_keys.issubset(self._pressed_aux_keys)
+        if not freestyle_triggered or "freestyle" in self._active_aux_hotkeys:
             return
 
         self._active_aux_hotkeys.add("freestyle")
@@ -499,6 +525,7 @@ class RuntimeController:
         key_id = HotkeyListener.key_to_identifier(key)
         if key_id:
             self._pressed_aux_keys.discard(key_id)
+        sync_modifier_state(self._pressed_aux_keys, self._modifier_probe)
 
         if "refine" in self._active_aux_hotkeys and not self._refine_hotkey_keys.issubset(self._pressed_aux_keys):
             self._active_aux_hotkeys.discard("refine")
@@ -582,6 +609,7 @@ class RuntimeController:
             on_session_started=self._on_session_started,
             on_session_stopped=self._on_session_stopped,
             on_quit=self._on_quit_requested,
+            modifier_probe=self._modifier_probe,
         )
         self._keyboard_listener = keyboard.Listener(
             on_press=self._on_keyboard_press,
