@@ -11,11 +11,13 @@ Hotkey-driven speech-to-text clipboard tool.
 | `Ctrl+Alt+R` | Refine clipboard text in-place |
 | `Ctrl+Alt+S` | Summarize clipboard text in-place |
 | `Ctrl+Alt+T` | Translate clipboard text in-place |
+| `Ctrl+Alt+F` | Freestyle: record a voice prompt + combine with clipboard content → LLM result to clipboard |
 | `Ctrl+Alt+Q` | Quit the app |
 
 Refine keeps the input language unchanged, cleans up transcript artifacts, and corrects grammar and spelling without translating.
 Summary returns a summary in the same language as the input.
 Translation auto-detects the source language and translates `DE -> EN`, `EN -> DE`, and all other languages to English.
+Freestyle combines any clipboard content (e-mail, code, article, …) with a freely spoken voice prompt and sends both to an LLM. The result is placed in the clipboard. Requires `OPENAI_API_KEY`.
 
 Migration note: if you already use `RECORD_AND_REFINE_HOTKEY` in your `.env`, update it manually from `ctrl+alt+e` to `ctrl+alt+w`.
 
@@ -96,7 +98,7 @@ If you choose local Whisper during onboarding, the model download begins only af
 - Set `STT_WHISPER_MODEL` to one of the curated onboarding defaults such as `tiny`, `base`, `small`, `medium`, or `large-v3`.
 - Set `STT_MODEL_CACHE_DIR` to override the local model cache location.
 - Set `RECORDING_MODE=toggle` (default) or `RECORDING_MODE=hold`.
-- Set `RECORDING_HOTKEY`, `REFINE_HOTKEY`, `RECORD_AND_REFINE_HOTKEY`, `SUMMARY_HOTKEY`, `TRANSLATION_HOTKEY`, and `QUIT_HOTKEY` as needed.
+- Set `RECORDING_HOTKEY`, `REFINE_HOTKEY`, `RECORD_AND_REFINE_HOTKEY`, `SUMMARY_HOTKEY`, `TRANSLATION_HOTKEY`, `FREESTYLE_HOTKEY`, and `QUIT_HOTKEY` as needed.
 - Set `ONBOARDING_VERSION=1` when setup has completed successfully.
 
 ## Auto-Start
